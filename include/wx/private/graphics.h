@@ -27,16 +27,46 @@ class WXDLLIMPEXP_CORE wxGraphicsObjectRefData : public wxObjectRefData
     wxGraphicsRenderer* m_renderer;
 } ;
 
+class WXDLLIMPEXP_CORE wxGraphicsPenData : public wxGraphicsObjectRefData
+{
+public :
+    wxGraphicsPenData( wxGraphicsRenderer* renderer) :
+       wxGraphicsObjectRefData(renderer) {}
+
+    virtual ~wxGraphicsPenData() {}
+ 
+    virtual wxDouble GetWidth() const = 0;
+} ;
+
+class WXDLLIMPEXP_CORE wxGraphicsBrushData : public wxGraphicsObjectRefData
+{
+public:
+    wxGraphicsBrushData(wxGraphicsRenderer* renderer) :
+        wxGraphicsObjectRefData(renderer) {}
+
+    virtual ~wxGraphicsBrushData() {}
+    virtual void* GetNativeBrush() const = 0;
+    virtual void Transform(const wxGraphicsMatrixData* matrix) = 0;
+};
+
 class WXDLLIMPEXP_CORE wxGraphicsBitmapData : public wxGraphicsObjectRefData
 {
 public :
     wxGraphicsBitmapData( wxGraphicsRenderer* renderer) :
-       wxGraphicsObjectRefData(renderer) {}
+       wxGraphicsObjectRefData(renderer), m_scaleFactor(1.0) {}
 
-       virtual ~wxGraphicsBitmapData() {}
+    virtual ~wxGraphicsBitmapData() {}
 
-       // returns the native representation
-       virtual void * GetNativeBitmap() const = 0;
+    // returns the native representation
+    virtual void * GetNativeBitmap() const = 0;
+    virtual int GetWidth() const = 0;
+    virtual int GetHeight() const = 0;
+    int GetScaledWidth() const { return wxRound(GetWidth() / m_scaleFactor); }
+    int GetScaledHeight() const  { return wxRound(GetHeight() / m_scaleFactor);};
+    double GetScaleFactor() const { return m_scaleFactor; }
+
+protected:
+       double m_scaleFactor;
 } ;
 
 class WXDLLIMPEXP_CORE wxGraphicsMatrixData : public wxGraphicsObjectRefData
@@ -160,7 +190,14 @@ public :
     // gets the bounding box enclosing all points (possibly including control points)
     virtual void GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const=0;
 
+    //gets the bounding box including the width of the pen
+    virtual void GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const = 0;
+
     virtual bool Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle = wxODDEVEN_RULE) const=0;
+
+    virtual bool OutlineContains(wxDouble x, wxDouble y, const wxGraphicsPenData* pen) const = 0;
+
+    virtual void ConvertToStrokePath(const wxGraphicsPenData* pen) = 0;
 };
 
 #endif
