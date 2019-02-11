@@ -399,7 +399,7 @@ ID2D1Factory* wxD2D1Factory()
 #endif  //__WXDEBUG__
 
         HRESULT hr = wxDirect2D::D2D1CreateFactory(
-            D2D1_FACTORY_TYPE_SINGLE_THREADED,
+            D2D1_FACTORY_TYPE_MULTI_THREADED,
             wxIID_ID2D1Factory,
             &factoryOptions,
             reinterpret_cast<void**>(&gs_ID2D1Factory)
@@ -967,6 +967,87 @@ bool operator==(const D2D1::Matrix3x2F& lhs, const D2D1::Matrix3x2F& rhs)
         lhs._31 == rhs._31 && lhs._32 == rhs._32;
 }
 
+
+//-----------------------------------------------------------------------------
+// wxD2DBrushData declaration
+//-----------------------------------------------------------------------------
+
+class wxD2DBrushData : public wxGraphicsBrushData, public wxD2DManagedGraphicsData
+{
+public:
+    wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush);
+
+    wxD2DBrushData(wxGraphicsRenderer* renderer);
+
+    void CreateLinearGradientBrush(wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2, const wxGraphicsGradientStops& stops);
+
+    void CreateRadialGradientBrush(wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius, const wxGraphicsGradientStops& stops);
+
+    ID2D1Brush* GetBrush() const
+    {
+        return (ID2D1Brush*)(m_brushResourceHolder->GetResource());
+    }
+
+    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
+    {
+        return m_brushResourceHolder.get();
+    }
+    virtual void* GetNativeBrush() const wxOVERRIDE 
+    {
+        return m_brushResourceHolder->GetResource();
+    }
+    virtual void Transform(const wxGraphicsMatrixData* matrix) wxOVERRIDE
+    {
+        D2D1::Matrix3x2F* nativeMatrix = (D2D1::Matrix3x2F*)(matrix->GetNativeMatrix());
+        ID2D1Brush* nativeBrush = GetBrush();
+        nativeBrush->SetTransform(nativeMatrix);
+    }
+
+private:
+    wxSharedPtr<wxManagedResourceHolder> m_brushResourceHolder;
+};
+
+
+//-----------------------------------------------------------------------------
+// wxD2DPenData declaration
+//-----------------------------------------------------------------------------
+
+class wxD2DPenData : public wxGraphicsPenData, public wxD2DManagedGraphicsData
+{
+public:
+    wxD2DPenData(wxGraphicsRenderer* renderer,
+                 ID2D1Factory* direct2dFactory,
+                 const wxGraphicsPenInfo& info);
+
+    void CreateStrokeStyle(ID2D1Factory* const direct2dfactory);
+
+    ID2D1Brush* GetBrush() const;
+
+    wxDouble GetWidth() const;
+
+    ID2D1StrokeStyle* GetStrokeStyle() const;
+
+    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
+    {
+        return m_stippleBrush->GetManagedObject();
+    }
+
+private:
+    // We store the original pen description for later when we need to recreate
+    // the device-dependent resources.
+    const wxGraphicsPenInfo m_penInfo;
+
+    // A stroke style is a device-independent resource.
+    // Describes the caps, miter limit, line join, and dash information.
+    wxCOMPtr<ID2D1StrokeStyle> m_strokeStyle;
+
+    // Drawing outlines with Direct2D requires a brush for the color or stipple.
+    wxSharedPtr<wxD2DBrushData> m_stippleBrush;
+
+    // The width of the stroke
+    FLOAT m_width;
+};
+
 //-----------------------------------------------------------------------------
 // wxD2DMatrixData declaration
 //-----------------------------------------------------------------------------
@@ -1186,12 +1267,17 @@ public :
     void GetBox(wxDouble* x, wxDouble* y, wxDouble* w, wxDouble *h) const wxOVERRIDE;
 
     bool Contains(wxDouble x, wxDouble y, wxPolygonFillMode fillStyle = wxODDEVEN_RULE) const wxOVERRIDE;
+    bool OutlineContains( wxDouble x, wxDouble y, const wxGraphicsPenData* pen ) const wxOVERRIDE;
+
+    void GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE;
 
     // appends an ellipsis as a new closed subpath fitting the passed rectangle
     void AddCircle(wxDouble x, wxDouble y, wxDouble r) wxOVERRIDE;
 
     // appends an ellipse
     void AddEllipse(wxDouble x, wxDouble y, wxDouble w, wxDouble h) wxOVERRIDE;
+
+    void ConvertToStrokePath(const wxGraphicsPenData* pen) wxOVERRIDE;
 
 private:
     void EnsureGeometryOpen();
@@ -1927,6 +2013,95 @@ void wxD2DPathData::GetBox(wxDouble* x, wxDouble* y, wxDouble* w, wxDouble *h) c
     if (h) *h = bounds.bottom - bounds.top;
 }
 
+void wxD2DPathData::GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble* x, wxDouble* y, wxDouble* w, wxDouble *h) const
+{
+    D2D1_RECT_F d2dBounds;
+    D2D1::Matrix3x2F* matrixNative = NULL;
+    FLOAT width = 0;
+    ID2D1StrokeStyle* stroke = NULL;
+    const wxD2DPenData* penData = static_cast<const wxD2DPenData*>(pen);
+    if (penData)
+    {
+        width = penData->GetWidth();
+        stroke = penData->GetStrokeStyle();
+    }
+    if (matrix)
+        matrixNative = (D2D1::Matrix3x2F*)matrix->GetNativeMatrix();
+    ID2D1Geometry *curGeometry = GetFullGeometry();
+    HRESULT hr = curGeometry->GetWidenedBounds(width, stroke, matrixNative, &d2dBounds);
+    if (FAILED(hr))
+    {
+        if (x != NULL) *x = 0;
+        if (y != NULL) *y = 0;
+        if (w != NULL) *w = 0;
+        if (h != NULL) *h = 0;
+    }
+    else
+    {
+        if (x != NULL) *x = d2dBounds.left;
+        if (y != NULL) *y = d2dBounds.top;
+        if (w != NULL) *w = d2dBounds.right - d2dBounds.left;
+        if (h != NULL) *h = d2dBounds.bottom - d2dBounds.top;
+    }
+}
+
+void wxD2DPathData::ConvertToStrokePath(const wxGraphicsPenData* pen)
+{
+	const wxD2DPenData* penData = static_cast<const wxD2DPenData*>(pen);
+    if (m_pTransformedGeometries.size() == 0)   
+    {
+        HRESULT hr;
+        FLOAT width = penData->GetWidth();
+        ID2D1StrokeStyle* stroke = penData->GetStrokeStyle();
+        wxCOMPtr<ID2D1PathGeometry> widenedGeometry;
+        hr = m_direct2dfactory->CreatePathGeometry(&widenedGeometry);
+        wxCOMPtr<ID2D1GeometrySink> geometrySink;
+        hr = widenedGeometry->Open(&geometrySink);
+        hr = m_pathGeometry->Widen(
+            width,
+            stroke,
+            D2D1::Matrix3x2F::Identity(),
+            geometrySink.get()
+        );
+        if (FAILED(hr))
+        {
+            wxASSERT(false);
+        }
+        geometrySink->Close();
+        m_pathGeometry.reset();
+        m_pathGeometry = widenedGeometry;
+    }
+    else
+    {
+        HRESULT hr;
+        FLOAT width = penData->GetWidth();
+        ID2D1StrokeStyle* stroke = penData->GetStrokeStyle();
+        wxCOMPtr<ID2D1PathGeometry> widenedGeometry;
+        hr = m_direct2dfactory->CreatePathGeometry(&widenedGeometry);
+        wxCOMPtr<ID2D1GeometrySink> geometrySink;
+        hr = widenedGeometry->Open(&geometrySink);
+        ID2D1Geometry *curGeometry = GetFullGeometry();
+        hr = curGeometry->Widen(
+            width,
+            stroke,
+            D2D1::Matrix3x2F::Identity(),
+            geometrySink.get()
+        );
+        if (FAILED(hr))
+        {
+            wxASSERT(false);
+        }
+        geometrySink->Close();
+        m_pathGeometry.reset();
+        m_pathGeometry = widenedGeometry;
+        for (size_t i = 0; i < m_pTransformedGeometries.size(); ++i)
+        {
+            m_pTransformedGeometries[i]->Release();
+        }
+        m_pTransformedGeometries.clear();
+    }
+}
+
 bool wxD2DPathData::Contains(wxDouble x, wxDouble y, wxPolygonFillMode WXUNUSED(fillStyle)) const
 {
     BOOL result;
@@ -2174,6 +2349,7 @@ public:
     {
     }
 
+    wxBitmap& GetSourceBitmap() { return m_sourceBitmap; }
     const wxBitmap& GetSourceBitmap() const { return m_sourceBitmap; }
 
 protected:
@@ -2245,7 +2421,7 @@ protected:
     }
 
 private:
-    const wxBitmap m_sourceBitmap;
+    wxBitmap m_sourceBitmap;
 };
 
 //-----------------------------------------------------------------------------
@@ -2272,6 +2448,8 @@ public:
     {
         return &m_bitmapHolder;
     }
+    virtual int GetWidth() const { return m_bitmapHolder.GetSourceBitmap().GetWidth(); }
+    virtual int GetHeight() const { return m_bitmapHolder.GetSourceBitmap().GetHeight(); }
 
 private:
     NativeType m_bitmapHolder;
@@ -2468,40 +2646,11 @@ private:
 };
 
 //-----------------------------------------------------------------------------
-// wxD2DBrushData declaration
-//-----------------------------------------------------------------------------
-
-class wxD2DBrushData : public wxGraphicsObjectRefData, public wxD2DManagedGraphicsData
-{
-public:
-    wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush);
-
-    wxD2DBrushData(wxGraphicsRenderer* renderer);
-
-    void CreateLinearGradientBrush(wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2, const wxGraphicsGradientStops& stops);
-
-    void CreateRadialGradientBrush(wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius, const wxGraphicsGradientStops& stops);
-
-    ID2D1Brush* GetBrush() const
-    {
-        return (ID2D1Brush*)(m_brushResourceHolder->GetResource());
-    }
-
-    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
-    {
-        return m_brushResourceHolder.get();
-    }
-
-private:
-    wxSharedPtr<wxManagedResourceHolder> m_brushResourceHolder;
-};
-
-//-----------------------------------------------------------------------------
 // wxD2DBrushData implementation
 //-----------------------------------------------------------------------------
 
 wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush)
-    : wxGraphicsObjectRefData(renderer), m_brushResourceHolder(NULL)
+    : wxGraphicsBrushData(renderer), m_brushResourceHolder(NULL)
 {
     if (brush.GetStyle() == wxBRUSHSTYLE_SOLID)
     {
@@ -2518,7 +2667,7 @@ wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush
 }
 
 wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer)
-    : wxGraphicsObjectRefData(renderer), m_brushResourceHolder(NULL)
+    : wxGraphicsBrushData(renderer), m_brushResourceHolder(NULL)
 {
 }
 
@@ -2572,45 +2721,6 @@ wxBrushStyle wxConvertPenStyleToBrushStyle(wxPenStyle penStyle)
     return wxBRUSHSTYLE_SOLID;
 }
 
-//-----------------------------------------------------------------------------
-// wxD2DPenData declaration
-//-----------------------------------------------------------------------------
-
-class wxD2DPenData : public wxGraphicsObjectRefData, public wxD2DManagedGraphicsData
-{
-public:
-    wxD2DPenData(wxGraphicsRenderer* renderer,
-                 ID2D1Factory* direct2dFactory,
-                 const wxGraphicsPenInfo& info);
-
-    void CreateStrokeStyle(ID2D1Factory* const direct2dfactory);
-
-    ID2D1Brush* GetBrush();
-
-    FLOAT GetWidth();
-
-    ID2D1StrokeStyle* GetStrokeStyle();
-
-    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
-    {
-        return m_stippleBrush->GetManagedObject();
-    }
-
-private:
-    // We store the original pen description for later when we need to recreate
-    // the device-dependent resources.
-    const wxGraphicsPenInfo m_penInfo;
-
-    // A stroke style is a device-independent resource.
-    // Describes the caps, miter limit, line join, and dash information.
-    wxCOMPtr<ID2D1StrokeStyle> m_strokeStyle;
-
-    // Drawing outlines with Direct2D requires a brush for the color or stipple.
-    wxSharedPtr<wxD2DBrushData> m_stippleBrush;
-
-    // The width of the stroke
-    FLOAT m_width;
-};
 
 //-----------------------------------------------------------------------------
 // wxD2DPenData implementation
@@ -2620,7 +2730,7 @@ wxD2DPenData::wxD2DPenData(
     wxGraphicsRenderer* renderer,
     ID2D1Factory* direct2dFactory,
     const wxGraphicsPenInfo& info)
-    : wxGraphicsObjectRefData(renderer),
+    : wxGraphicsPenData(renderer),
       m_penInfo(info),
       m_width(info.GetWidth())
 {
@@ -2676,17 +2786,17 @@ void wxD2DPenData::CreateStrokeStyle(ID2D1Factory* const direct2dfactory)
     delete[] dashes;
 }
 
-ID2D1Brush* wxD2DPenData::GetBrush()
+ID2D1Brush* wxD2DPenData::GetBrush() const
 {
     return m_stippleBrush->GetBrush();
 }
 
-FLOAT wxD2DPenData::GetWidth()
+wxDouble wxD2DPenData::GetWidth() const
 {
     return m_width;
 }
 
-ID2D1StrokeStyle* wxD2DPenData::GetStrokeStyle()
+ID2D1StrokeStyle* wxD2DPenData::GetStrokeStyle() const
 {
     return m_strokeStyle;
 }
@@ -2695,6 +2805,26 @@ wxD2DPenData* wxGetD2DPenData(const wxGraphicsPen& pen)
 {
     return static_cast<wxD2DPenData*>(pen.GetGraphicsData());
 }
+
+//-----------------------------------------------------------------------------
+// Extend wxD2DPathData implementation
+//-----------------------------------------------------------------------------
+bool wxD2DPathData::OutlineContains( wxDouble x, wxDouble y, const wxGraphicsPenData* pen ) const
+{
+    const wxD2DPenData* penData = static_cast<const wxD2DPenData*>(pen);
+    if (!penData)
+        return false;
+    BOOL result;
+    FLOAT width = penData->GetWidth();
+    ID2D1StrokeStyle* stroke = penData->GetStrokeStyle();
+    ID2D1Geometry *curGeometry = GetFullGeometry();
+    curGeometry->StrokeContainsPoint(D2D1::Point2F(x, y), width, stroke, D2D1::Matrix3x2F::Identity(), &result);
+    return result != FALSE;
+}
+
+//-----------------------------------------------------------------------------
+// wxD2DFontData implementation
+//-----------------------------------------------------------------------------
 
 class wxD2DFontData : public wxGraphicsObjectRefData
 {
@@ -2858,6 +2988,18 @@ public:
         wxCompositionMode WXUNUSED(compositionMode))
     {
         D2D1_RECT_F destinationRectangle = D2D1::RectF(offset.x, offset.y, offset.x + imageRectangle.right, offset.y + imageRectangle.bottom);
+        m_nativeResource->DrawBitmap(
+            bitmap,
+            destinationRectangle,
+            1.0f,
+            wxD2DConvertBitmapInterpolationMode(interpolationQuality),
+            imageRectangle);
+    }
+
+    virtual void DrawBitmap(ID2D1Bitmap* bitmap, D2D1_RECT_F imageRectangle,
+        D2D1_RECT_F destinationRectangle, wxInterpolationQuality interpolationQuality,
+        wxCompositionMode WXUNUSED(compositionMode))
+    {
         m_nativeResource->DrawBitmap(
             bitmap,
             destinationRectangle,
@@ -3360,11 +3502,41 @@ protected:
         m_nativeResource = renderTarget;
     }
 
-private:
+protected:
     ID2D1Factory* m_factory;
     HDC m_hdc;
     D2D1_ALPHA_MODE m_alphaMode;
 };
+
+class wxD2DBitmapRenderTargetResourceHolder : public wxD2DDCRenderTargetResourceHolder
+{
+public:
+    wxD2DBitmapRenderTargetResourceHolder(wxGraphicsBitmap* bitmap, ID2D1Factory* factory) :
+        wxD2DDCRenderTargetResourceHolder(factory, NULL, D2D1_ALPHA_MODE_PREMULTIPLIED),
+    m_bitmap((wxD2DBitmapData::NativeType*)bitmap->GetNativeBitmap())
+    {
+        m_memoryDC.SelectObject(m_bitmap->GetSourceBitmap());
+    m_hdc = (HDC)(m_memoryDC.GetHDC());
+    }
+
+    HRESULT Flush() wxOVERRIDE
+    {
+        HRESULT hr = S_FALSE;
+        if (m_nativeResource)
+            hr = m_nativeResource->Flush();
+        m_memoryDC.SelectObject(wxNullBitmap);
+        return hr;
+    }
+
+    ~wxD2DBitmapRenderTargetResourceHolder()
+    {
+        Flush();
+    }
+private:
+    wxD2DBitmapData::NativeType* m_bitmap;
+    wxMemoryDC m_memoryDC;
+};
+
 
 // The null context has no state of its own and does nothing.
 // It is only used as a base class for the lightweight
@@ -3398,6 +3570,7 @@ public:
     wxGraphicsMatrix GetTransform() const wxOVERRIDE { return wxNullGraphicsMatrix; }
     void StrokePath(const wxGraphicsPath&) wxOVERRIDE {}
     void FillPath(const wxGraphicsPath&, wxPolygonFillMode) wxOVERRIDE {}
+    void DrawBitmap(const wxGraphicsBitmap&, const wxRect2DDouble&, const wxRect2DDouble&) wxOVERRIDE {}
     void DrawBitmap(const wxGraphicsBitmap&, wxDouble, wxDouble, wxDouble, wxDouble) wxOVERRIDE {}
     void DrawBitmap(const wxBitmap&, wxDouble, wxDouble, wxDouble, wxDouble) wxOVERRIDE {}
     void DrawIcon(const wxIcon&, wxDouble, wxDouble, wxDouble, wxDouble) wxOVERRIDE {}
@@ -3477,6 +3650,8 @@ public:
                  const wxDC* dc = NULL,
                  D2D1_ALPHA_MODE alphaMode = D2D1_ALPHA_MODE_IGNORE);
 
+    wxD2DContext(wxGraphicsRenderer* renderer, ID2D1Factory* direct2dFactory, wxGraphicsBitmap& bitmap);
+
 #if wxUSE_IMAGE
     wxD2DContext(wxGraphicsRenderer* renderer, ID2D1Factory* direct2dFactory, wxImage& image);
 #endif // wxUSE_IMAGE
@@ -3527,6 +3702,8 @@ public:
     void DrawRoundedRectangle(wxDouble x, wxDouble y, wxDouble w, wxDouble h, wxDouble radius) wxOVERRIDE;
 
     void DrawEllipse(wxDouble x, wxDouble y, wxDouble w, wxDouble h) wxOVERRIDE;
+
+    void DrawBitmap(const wxGraphicsBitmap& bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest) wxOVERRIDE;
 
     void DrawBitmap(const wxGraphicsBitmap& bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h) wxOVERRIDE;
 
@@ -3653,6 +3830,16 @@ wxD2DContext::wxD2DContext(wxGraphicsRenderer* renderer,
         m_width = dcSize.GetWidth();
         m_height = dcSize.GetHeight();
     }
+
+    Init();
+}
+
+wxD2DContext::wxD2DContext(wxGraphicsRenderer* renderer, ID2D1Factory* direct2dFactory, wxGraphicsBitmap& bitmap) :
+    wxGraphicsContext(renderer), m_direct2dFactory(direct2dFactory),
+    m_renderTargetHolder(new wxD2DBitmapRenderTargetResourceHolder(&bitmap, direct2dFactory))
+{
+    m_width = bitmap.GetWidth();
+    m_height = bitmap.GetHeight();
 
     Init();
 }
@@ -4147,6 +4334,25 @@ wxGraphicsMatrix wxD2DContext::GetTransform() const
     return matrix;
 }
 
+void wxD2DContext::DrawBitmap(const wxGraphicsBitmap& bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest)
+{
+    if (m_composition == wxCOMPOSITION_DEST)
+        return;
+
+    wxD2DBitmapData* bitmapData = wxGetD2DBitmapData(bmp);
+    bitmapData->Bind(this);
+
+    D2D1_RECT_F rectSrc = D2D1::RectF(rcSrc.m_x, rcSrc.m_y,	rcSrc.m_x + rcSrc.m_width, rcSrc.m_y + rcSrc.m_height);
+    D2D1_RECT_F rectDest = D2D1::RectF(rcDest.m_x, rcDest.m_y, rcDest.m_x + rcDest.m_width, rcDest.m_y + rcDest.m_height);
+
+    m_renderTargetHolder->DrawBitmap(
+        bitmapData->GetD2DBitmap(),
+        rectSrc,
+        rectDest,
+        GetInterpolationQuality(),
+        GetCompositionMode());
+}
+
 void wxD2DContext::DrawBitmap(const wxGraphicsBitmap& bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h)
 {
     if (m_composition == wxCOMPOSITION_DEST)
@@ -4517,6 +4723,8 @@ public :
 
     wxGraphicsContext* CreateContext(wxWindow* window) wxOVERRIDE;
 
+    wxGraphicsContext* CreateContextFromBitmap(wxGraphicsBitmap& bitmap) wxOVERRIDE;
+
 #if wxUSE_IMAGE
     wxGraphicsContext* CreateContextFromImage(wxImage& image) wxOVERRIDE;
 #endif // wxUSE_IMAGE
@@ -4546,6 +4754,8 @@ public :
 
     // create a native bitmap representation
     wxGraphicsBitmap CreateBitmap(const wxBitmap& bitmap) wxOVERRIDE;
+
+    wxGraphicsBitmap CreateBitmap( int w, int h, wxDouble scale = 1 ) wxOVERRIDE;
 
 #if wxUSE_IMAGE
     wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) wxOVERRIDE;
@@ -4662,6 +4872,11 @@ wxGraphicsContext* wxD2DRenderer::CreateContext(wxWindow* window)
     return new wxD2DContext(this, m_direct2dFactory, (HWND)window->GetHWND(), window);
 }
 
+wxGraphicsContext* wxD2DRenderer::CreateContextFromBitmap(wxGraphicsBitmap& bitmap)
+{
+    return new wxD2DContext(this, m_direct2dFactory, bitmap);
+}
+
 #if wxUSE_IMAGE
 wxGraphicsContext* wxD2DRenderer::CreateContextFromImage(wxImage& image)
 {
@@ -4762,6 +4977,20 @@ wxGraphicsBitmap wxD2DRenderer::CreateBitmap(const wxBitmap& bitmap)
     graphicsBitmap.SetRefData(bitmapData);
 
     return graphicsBitmap;
+}
+
+wxGraphicsBitmap wxD2DRenderer::CreateBitmap( int w, int h, wxDouble scale /*=1*/ )
+{
+    wxASSERT(scale == 1);
+    if ( w > 0 && h > 0 )
+    {
+        wxGraphicsBitmap p;
+        wxBitmap bitmap(w, h, 32);
+        p.SetRefData(new wxD2DBitmapData( this, bitmap));
+        return p;
+    }
+    else
+        return wxNullGraphicsBitmap;
 }
 
 // create a graphics bitmap from a native bitmap

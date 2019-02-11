@@ -119,6 +119,34 @@ WXDLLIMPEXP_DATA_CORE(wxGraphicsBrush) wxNullGraphicsBrush;
 WXDLLIMPEXP_DATA_CORE(wxGraphicsFont) wxNullGraphicsFont;
 WXDLLIMPEXP_DATA_CORE(wxGraphicsBitmap) wxNullGraphicsBitmap;
 
+
+//-----------------------------------------------------------------------------
+// pen
+//-----------------------------------------------------------------------------
+
+// gets the width of the pen
+wxDouble wxGraphicsPen::GetWidth() const
+{
+    return GetPenData()->GetWidth();
+}
+
+
+//-----------------------------------------------------------------------------
+// brush
+//-----------------------------------------------------------------------------
+
+
+void* wxGraphicsBrush::GetNativeBrush() const
+{
+    return GetBrushData()->GetNativeBrush();
+}
+
+
+void wxGraphicsBrush::Transform(const wxGraphicsMatrix& matrix)
+{
+    GetBrushData()->Transform(matrix.GetMatrixData());
+}
+
 //-----------------------------------------------------------------------------
 // matrix
 //-----------------------------------------------------------------------------
@@ -379,11 +407,35 @@ void wxGraphicsPath::GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) 
     GetPathData()->GetBox(x,y,w,h);
 }
 
+// gets the bounding box enclosing all points (possibly including control points)
+void wxGraphicsPath::GetWidenedBox(const wxGraphicsPen& pen, const wxGraphicsMatrix& matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const
+{
+    GetPathData()->GetWidenedBox(pen.GetPenData(), matrix.GetMatrixData(), x,y,w,h);
+}
+
+wxRect2DDouble wxGraphicsPath::GetWidenedBox(const wxGraphicsPen& pen, const wxGraphicsMatrix& matrix) const
+{
+    wxDouble x,y,w,h;
+    GetWidenedBox(pen, matrix, &x,&y,&w,&h);
+    return wxRect2DDouble( x,y,w,h );
+}
+
 bool wxGraphicsPath::Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle ) const
 {
     return GetPathData()->Contains(x,y,fillStyle);
 }
 
+bool wxGraphicsPath::OutlineContains(wxDouble x, wxDouble y, const wxGraphicsPen& pen) const
+{
+    return GetPathData()->OutlineContains(x,y, pen.GetPenData());
+}
+
+// transforms each point of this path by the matrix
+void wxGraphicsPath::ConvertToStrokePath(const wxGraphicsPen& pen)
+{
+    AllocExclusive();
+    GetPathData()->ConvertToStrokePath(pen.GetPenData());
+}
 //
 // Emulations, these mus be implemented in the ...Data classes in order to allow for proper overrides
 //
@@ -558,6 +610,33 @@ void wxGraphicsGradientStops::Add(const wxGraphicsGradientStop& stop)
 void * wxGraphicsBitmap::GetNativeBitmap() const
 {
     return GetBitmapData()->GetNativeBitmap();
+}
+
+
+int wxGraphicsBitmap::GetWidth() const
+{
+    return GetBitmapData()->GetWidth();
+}
+
+
+int wxGraphicsBitmap::GetHeight() const
+{
+    return GetBitmapData()->GetHeight();
+}
+
+int wxGraphicsBitmap::GetScaledWidth() const
+{
+    return GetBitmapData()->GetScaledWidth();
+}
+
+int wxGraphicsBitmap::GetScaledHeight() const
+{
+    return GetBitmapData()->GetScaledHeight();
+}
+
+double wxGraphicsBitmap::GetScaleFactor() const
+{
+    return GetBitmapData()->GetScaleFactor();
 }
 
 //-----------------------------------------------------------------------------
@@ -777,9 +856,16 @@ void wxGraphicsContext::DrawRectangle( wxDouble x, wxDouble y, wxDouble w, wxDou
     DrawPath( path );
 }
 
-void wxGraphicsContext::ClearRectangle( wxDouble WXUNUSED(x), wxDouble WXUNUSED(y), wxDouble WXUNUSED(w), wxDouble WXUNUSED(h))
+void wxGraphicsContext::ClearRectangle(wxDouble x, wxDouble y, wxDouble w, wxDouble h)
 {
 
+    wxCompositionMode eCompMode = GetCompositionMode();
+    SetCompositionMode(wxCOMPOSITION_SOURCE);
+    wxGraphicsPath path = CreatePath();
+    path.AddRectangle( x , y , w , h );
+    SetBrush(wxBrush(wxColour(0, 0, 0, 0)));
+    FillPath( path );
+    SetCompositionMode(eCompMode);
 }
 
 void wxGraphicsContext::DrawEllipse( wxDouble x, wxDouble y, wxDouble w, wxDouble h)
@@ -947,6 +1033,11 @@ wxGraphicsContext::CreateFont(double size,
 wxGraphicsBitmap wxGraphicsContext::CreateBitmap( const wxBitmap& bmp ) const
 {
     return GetRenderer()->CreateBitmap(bmp);
+}
+
+wxGraphicsBitmap wxGraphicsContext::CreateBitmap( int w, int h, wxDouble scale ) const
+{
+    return GetRenderer()->CreateBitmap(w, h, scale);
 }
 
 #if wxUSE_IMAGE

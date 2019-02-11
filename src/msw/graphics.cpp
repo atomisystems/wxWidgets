@@ -187,8 +187,11 @@ public :
 
     // gets the bounding box enclosing all points (possibly including control points)
     virtual void GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE;
-
+    virtual void GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE;
     virtual bool Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle = wxODDEVEN_RULE) const wxOVERRIDE;
+    virtual bool OutlineContains( wxDouble x, wxDouble y, const wxGraphicsPenData* pen) const wxOVERRIDE;
+
+    virtual void ConvertToStrokePath(const wxGraphicsPenData* pen) wxOVERRIDE;
 
 private :
     GraphicsPath* m_path;
@@ -263,8 +266,8 @@ public:
 
     void Init();
 
-    virtual wxDouble GetWidth() { return m_width; }
-    virtual Pen* GetGDIPlusPen() { return m_pen; }
+    virtual wxDouble GetWidth() const { return m_width; }
+    virtual Pen* GetGDIPlusPen()  const { return m_pen; }
 
 protected :
     Pen* m_pen;
@@ -274,7 +277,7 @@ protected :
     wxDouble m_width;
 };
 
-class wxGDIPlusBrushData : public wxGraphicsObjectRefData
+class wxGDIPlusBrushData : public wxGraphicsBrushData
 {
 public:
     wxGDIPlusBrushData( wxGraphicsRenderer* renderer );
@@ -290,6 +293,9 @@ public:
                                    const wxGraphicsGradientStops& stops);
 
     virtual Brush* GetGDIPlusBrush() { return m_brush; }
+
+    virtual void* GetNativeBrush() const  wxOVERRIDE { return (void*)(m_brush); }
+    virtual void Transform(const wxGraphicsMatrixData* matrix) wxOVERRIDE;
 
 protected:
     virtual void Init();
@@ -315,7 +321,8 @@ public:
 
     virtual Bitmap* GetGDIPlusBitmap() { return m_bitmap; }
     virtual void* GetNativeBitmap() const wxOVERRIDE { return m_bitmap; }
-
+    virtual int GetWidth() const { return m_bitmap->GetWidth(); }
+    virtual int GetHeight() const { return m_bitmap->GetHeight(); }
 #if wxUSE_IMAGE
     wxImage ConvertToImage() const;
 #endif // wxUSE_IMAGE
@@ -416,7 +423,7 @@ public:
 
     // gets the matrix of this context
     virtual wxGraphicsMatrix GetTransform() const wxOVERRIDE;
-
+    virtual void DrawBitmap(const wxGraphicsBitmap& bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest) wxOVERRIDE;
     virtual void DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) wxOVERRIDE;
     virtual void DrawBitmap( const wxBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) wxOVERRIDE;
     virtual void DrawIcon( const wxIcon &icon, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) wxOVERRIDE;
@@ -448,6 +455,38 @@ private:
     GraphicsState m_state2;
 
     wxDECLARE_NO_COPY_CLASS(wxGDIPlusContext);
+};
+
+class wxGDIPlusBitmapContext : public wxGDIPlusContext
+{
+public:
+    wxGDIPlusBitmapContext(wxGraphicsRenderer* renderer, wxGraphicsBitmap& bitmap) :
+        wxGDIPlusContext(renderer),
+        m_bitmap(bitmap)
+    {
+        wxGDIPlusBitmapData* bitmapData = static_cast<wxGDIPlusBitmapData*>(m_bitmap.GetRefData());
+        Init
+        (
+            new Graphics(bitmapData->GetGDIPlusBitmap()),
+            m_bitmap.GetWidth(),
+            m_bitmap.GetHeight()
+        );
+    }
+
+    virtual ~wxGDIPlusBitmapContext()
+    {
+        Flush();
+    }
+
+    virtual void Flush() wxOVERRIDE
+    {
+
+    }
+
+private:
+    wxGraphicsBitmap& m_bitmap;
+
+    wxDECLARE_NO_COPY_CLASS(wxGDIPlusBitmapContext);
 };
 
 #if wxUSE_IMAGE
@@ -554,6 +593,8 @@ public :
 
     virtual wxGraphicsContext * CreateContext( wxWindow* window ) wxOVERRIDE;
 
+    virtual wxGraphicsContext * CreateContextFromBitmap(wxGraphicsBitmap& bitmap) wxOVERRIDE;
+
 #if wxUSE_IMAGE
     virtual wxGraphicsContext * CreateContextFromImage(wxImage& image) wxOVERRIDE;
 #endif // wxUSE_IMAGE
@@ -587,6 +628,7 @@ public :
 
     // create a native bitmap representation
     virtual wxGraphicsBitmap CreateBitmap( const wxBitmap &bitmap ) wxOVERRIDE;
+    virtual wxGraphicsBitmap CreateBitmap( int w, int h, wxDouble scale = 1 ) wxOVERRIDE;
 #if wxUSE_IMAGE
     virtual wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) wxOVERRIDE;
     virtual wxImage CreateImageFromBitmap(const wxGraphicsBitmap& bmp) wxOVERRIDE;
@@ -799,13 +841,13 @@ wxGDIPlusPenData::wxGDIPlusPenData( wxGraphicsRenderer* renderer,
 //-----------------------------------------------------------------------------
 
 wxGDIPlusBrushData::wxGDIPlusBrushData( wxGraphicsRenderer* renderer )
-: wxGraphicsObjectRefData(renderer)
+: wxGraphicsBrushData(renderer)
 {
     Init();
 }
 
 wxGDIPlusBrushData::wxGDIPlusBrushData( wxGraphicsRenderer* renderer , const wxBrush &brush )
-: wxGraphicsObjectRefData(renderer)
+: wxGraphicsBrushData(renderer)
 {
     Init();
     if ( brush.GetStyle() == wxBRUSHSTYLE_SOLID)
@@ -954,6 +996,16 @@ wxGDIPlusBrushData::CreateRadialGradientBrush(wxDouble xo, wxDouble yo,
     // Because the GDI+ API draws radial gradients from outside towards the
     // center we have to reverse the order of the gradient stops.
     SetGradientStops(brush, stops, true);
+}
+
+
+void 
+wxGDIPlusBrushData::Transform(const wxGraphicsMatrixData* matrix)
+{
+    if (m_brush->GetType() == BrushTypeLinearGradient)
+		((LinearGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
+	else if (m_brush->GetType() == BrushTypePathGradient)
+		((PathGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
 }
 
 //-----------------------------------------------------------------------------
@@ -1492,10 +1544,40 @@ void wxGDIPlusPathData::GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *
     *h = bounds.Height;
 }
 
+void wxGDIPlusPathData::GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const
+{
+    Matrix* matrixNative = NULL;
+    Pen* penNative = NULL;
+    if (matrix)
+        matrixNative = (Matrix*)matrix->GetNativeMatrix();
+    if (pen)
+        penNative = (Pen*)((wxGDIPlusPenData*)pen)->GetGDIPlusPen();
+    RectF bounds;
+    m_path->GetBounds( &bounds, matrixNative, penNative) ;
+    *x = bounds.X;
+    *y = bounds.Y;
+    *w = bounds.Width;
+    *h = bounds.Height;
+}
+
 bool wxGDIPlusPathData::Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle ) const
 {
     m_path->SetFillMode( fillStyle == wxODDEVEN_RULE ? FillModeAlternate : FillModeWinding);
     return m_path->IsVisible( (FLOAT) x,(FLOAT) y) == TRUE ;
+}
+
+bool wxGDIPlusPathData::OutlineContains( wxDouble x, wxDouble y, const wxGraphicsPenData* pen ) const
+{
+    const Pen* penNative = NULL;
+    if (pen)
+        penNative = (Pen*)((wxGDIPlusPenData*)pen)->GetGDIPlusPen();
+    return m_path->IsOutlineVisible((REAL)x, (REAL)y, penNative) == TRUE;
+}
+
+void wxGDIPlusPathData::ConvertToStrokePath(const wxGraphicsPenData* pen)
+{
+    if (m_path)
+        m_path->Widen(pen ? (Pen*)((wxGDIPlusPenData*)pen)->GetGDIPlusPen() : NULL);
 }
 
 //-----------------------------------------------------------------------------
@@ -1992,6 +2074,19 @@ void wxGDIPlusContext::PopState()
     m_context->Restore(state);
 }
 
+void wxGDIPlusContext::DrawBitmap(const wxGraphicsBitmap& bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest)
+{
+    if (m_composition == wxCOMPOSITION_DEST)
+        return;
+
+    Bitmap* image = static_cast<wxGDIPlusBitmapData*>(bmp.GetRefData())->GetGDIPlusBitmap();
+    if ( image )
+    {
+        RectF rcfDest(rcDest.m_x, rcDest.m_y, rcDest.m_width, rcDest.m_height);
+        m_context->DrawImage(image, rcfDest, (REAL)rcSrc.m_x, (REAL)rcSrc.m_y, (REAL)rcSrc.m_width, (REAL)rcSrc.m_height, UnitPixel);
+    }
+}
+
 void wxGDIPlusContext::DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h )
 {
    if (m_composition == wxCOMPOSITION_DEST)
@@ -2462,6 +2557,14 @@ wxGraphicsContext * wxGDIPlusRenderer::CreateContext( const wxMemoryDC& dc)
     return context;
 }
 
+wxGraphicsContext * wxGDIPlusRenderer::CreateContextFromBitmap(wxGraphicsBitmap& bitmap)
+{
+    ENSURE_LOADED_OR_RETURN(NULL);
+    wxGDIPlusContext* context = new wxGDIPlusBitmapContext(this, bitmap);
+    context->EnableOffset(true);
+    return context;
+}
+
 #if wxUSE_IMAGE
 wxGraphicsContext * wxGDIPlusRenderer::CreateContextFromImage(wxImage& image)
 {
@@ -2620,6 +2723,21 @@ wxGDIPlusRenderer::CreateFont(double size,
     wxGraphicsFont f;
     f.SetRefData(new wxGDIPlusFontData(this, facename, size, style, col));
     return f;
+}
+
+wxGraphicsBitmap wxGDIPlusRenderer::CreateBitmap( int w, int h, wxDouble scale /*=1*/ )
+{
+    ENSURE_LOADED_OR_RETURN(wxNullGraphicsBitmap);
+    wxASSERT(scale == 1);
+    if ( w > 0 && h > 0 )
+    {
+        Bitmap* bitmap = new Bitmap( w, h, PixelFormat32bppPARGB ) ;
+        wxGraphicsBitmap p;
+        p.SetRefData(new wxGDIPlusBitmapData( this , bitmap ));
+        return p;
+    }
+    else
+        return wxNullGraphicsBitmap;
 }
 
 wxGraphicsBitmap wxGDIPlusRenderer::CreateBitmap( const wxBitmap &bitmap )

@@ -110,6 +110,8 @@ class WXDLLIMPEXP_FWD_CORE wxGraphicsBitmap;
 //
 
 class WXDLLIMPEXP_FWD_CORE wxGraphicsObjectRefData;
+class WXDLLIMPEXP_FWD_CORE wxGraphicsPenData;
+class WXDLLIMPEXP_FWD_CORE wxGraphicsBrushData;
 class WXDLLIMPEXP_FWD_CORE wxGraphicsBitmapData;
 class WXDLLIMPEXP_FWD_CORE wxGraphicsMatrixData;
 class WXDLLIMPEXP_FWD_CORE wxGraphicsPathData;
@@ -166,6 +168,14 @@ class WXDLLIMPEXP_CORE wxGraphicsPen : public wxGraphicsObject
 public:
     wxGraphicsPen() {}
     virtual ~wxGraphicsPen() {}
+
+    const wxGraphicsPenData* GetPenData() const
+    { return (const wxGraphicsPenData*) GetRefData(); }
+    wxGraphicsPenData* GetPenData()
+    { return (wxGraphicsPenData*) GetRefData(); }
+
+    wxDouble GetWidth() const;
+
 private:
     wxDECLARE_DYNAMIC_CLASS(wxGraphicsPen);
 };
@@ -177,6 +187,16 @@ class WXDLLIMPEXP_CORE wxGraphicsBrush : public wxGraphicsObject
 public:
     wxGraphicsBrush() {}
     virtual ~wxGraphicsBrush() {}
+
+    void* GetNativeBrush() const;
+
+    const wxGraphicsBrushData* GetBrushData() const
+    { return (const wxGraphicsBrushData*) GetRefData(); }
+    wxGraphicsBrushData* GetBrushData()
+    { return (wxGraphicsBrushData*) GetRefData(); }
+
+    void Transform(const wxGraphicsMatrix& matrix);
+
 private:
     wxDECLARE_DYNAMIC_CLASS(wxGraphicsBrush);
 };
@@ -213,6 +233,13 @@ public:
     { return (const wxGraphicsBitmapData*) GetRefData(); }
     wxGraphicsBitmapData* GetBitmapData()
     { return (wxGraphicsBitmapData*) GetRefData(); }
+
+    int GetWidth() const;
+    int GetHeight() const;
+
+    int GetScaledWidth() const;
+    int GetScaledHeight() const;
+    double GetScaleFactor() const;
 
 private:
     wxDECLARE_DYNAMIC_CLASS(wxGraphicsBitmap);
@@ -355,11 +382,18 @@ public:
     virtual void Transform( const wxGraphicsMatrix& matrix );
 
     // gets the bounding box enclosing all points (possibly including control points)
-    virtual void GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h)const;
+    virtual void GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const;
     wxRect2DDouble GetBox()const;
+
+    //gets the bounding box including the width of the pen
+    virtual void GetWidenedBox(const wxGraphicsPen& pen, const wxGraphicsMatrix& matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const;
+    wxRect2DDouble GetWidenedBox(const wxGraphicsPen& pen, const wxGraphicsMatrix& matrix)const;
 
     virtual bool Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle = wxODDEVEN_RULE)const;
     bool Contains( const wxPoint2DDouble& c, wxPolygonFillMode fillStyle = wxODDEVEN_RULE)const;
+    virtual bool OutlineContains(wxDouble x, wxDouble y, const wxGraphicsPen& pen) const;
+
+    virtual void ConvertToStrokePath(const wxGraphicsPen& pen);
 
     const wxGraphicsPathData* GetPathData() const
     { return (const wxGraphicsPathData*) GetRefData(); }
@@ -551,6 +585,8 @@ public:
 
     // create a native bitmap representation
     virtual wxGraphicsBitmap CreateBitmap( const wxBitmap &bitmap ) const;
+    virtual wxGraphicsBitmap CreateBitmap( int w, int h, wxDouble scale = 1 ) const;
+
 #if wxUSE_IMAGE
     wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) const;
 #endif // wxUSE_IMAGE
@@ -721,7 +757,12 @@ public:
 
     virtual void DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) = 0;
 
+    virtual void DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y ) 
+        { DrawBitmap(bmp, x, y, bmp.GetWidth(), bmp.GetHeight()); }
+
     virtual void DrawBitmap( const wxBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) = 0;
+
+    virtual void DrawBitmap( const wxGraphicsBitmap &bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest) = 0;
 
     virtual void DrawIcon( const wxIcon &icon, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) = 0;
 
@@ -743,6 +784,9 @@ public:
 
     // draws a rectangle
     virtual void DrawRectangle( wxDouble x, wxDouble y, wxDouble w, wxDouble h);
+
+    void DrawRectangle(const wxRect2DDouble& rc) { DrawRectangle(rc.m_x, rc.m_y, rc.m_width, rc.m_height); }
+    void DrawRectangle(const wxRect& rc) { DrawRectangle(rc.x, rc.y, rc.width, rc.height); }
 
     // draws an ellipse
     virtual void DrawEllipse( wxDouble x, wxDouble y, wxDouble w, wxDouble h);
@@ -888,6 +932,8 @@ public:
 
     virtual wxGraphicsContext * CreateContext( wxWindow* window ) = 0;
 
+    virtual wxGraphicsContext * CreateContextFromBitmap(wxGraphicsBitmap& image) = 0;
+
 #if wxUSE_IMAGE
     virtual wxGraphicsContext * CreateContextFromImage(wxImage& image) = 0;
 #endif // wxUSE_IMAGE
@@ -933,6 +979,8 @@ public:
 
     // create a native bitmap representation
     virtual wxGraphicsBitmap CreateBitmap( const wxBitmap &bitmap ) = 0;
+    virtual wxGraphicsBitmap CreateBitmap( int w, int h, wxDouble scale = 1 ) = 0;
+
 #if wxUSE_IMAGE
     virtual wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) = 0;
     virtual wxImage CreateImageFromBitmap(const wxGraphicsBitmap& bmp) = 0;
