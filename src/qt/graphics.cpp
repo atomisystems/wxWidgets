@@ -68,151 +68,6 @@ private:
 
 } // anonymous namespace
 
-class WXDLLIMPEXP_CORE wxQtBrushData : public wxGraphicsObjectRefData
-{
-public:
-    wxQtBrushData(wxGraphicsRenderer* renderer)
-        : wxGraphicsObjectRefData(renderer)
-    {
-    }
-
-    wxQtBrushData(wxGraphicsRenderer* renderer, const wxBrush& wxbrush)
-        : wxGraphicsObjectRefData(renderer),
-          m_brush(wxbrush.GetHandle())
-    {
-    }
-
-    void CreateLinearGradientBrush(wxDouble x1, wxDouble y1,
-                                   wxDouble x2, wxDouble y2,
-                                   const wxGraphicsGradientStops& stops)
-    {
-        QLinearGradient gradient(x1, y1, x2, y2);
-        SetStops(gradient, stops);
-        m_brush = QBrush(gradient);
-    }
-
-    void CreateRadialGradientBrush(wxDouble xo, wxDouble yo,
-                                   wxDouble xc, wxDouble yc,
-                                   wxDouble radius,
-                                   const wxGraphicsGradientStops& stops)
-    {
-        QRadialGradient gradient(QPointF(xc, yc), radius, QPointF(xo, yo));
-        SetStops(gradient, stops);
-        m_brush = QBrush(gradient);
-    }
-
-    const QBrush& getBrush() const
-    {
-        return m_brush;
-    }
-
-private:
-    static void
-    SetStops(QGradient& gradient, const wxGraphicsGradientStops& stops)
-    {
-        QGradientStops qstops;
-        for ( size_t i = 0; i < stops.GetCount(); ++i )
-        {
-            const wxGraphicsGradientStop stop = stops.Item(i);
-            qstops.append(QGradientStop(stop.GetPosition(),
-                                        stop.GetColour().GetQColor()));
-        }
-
-        gradient.setStops(qstops);
-    }
-
-    QBrush m_brush;
-
-    wxDECLARE_NO_COPY_CLASS(wxQtBrushData);
-};
-
-class WXDLLIMPEXP_CORE wxQtPenData : public wxGraphicsObjectRefData
-{
-public:
-    wxQtPenData(wxGraphicsRenderer* renderer, const wxGraphicsPenInfo& info)
-        : wxGraphicsObjectRefData(renderer),
-          m_pen(CreatePenFromInfo(info))
-    {
-    }
-
-    const QPen& GetPen() const
-    {
-        return m_pen;
-    }
-
-private:
-    static QPen CreatePenFromInfo(const wxGraphicsPenInfo& info)
-    {
-        wxPen wxpen(info.GetColour(), info.GetWidth(), info.GetStyle());
-        wxpen.SetDashes(info.GetDashCount(), info.GetDash());
-        wxpen.SetJoin(info.GetJoin());
-        wxpen.SetCap(info.GetCap());
-        switch ( info.GetStyle() )
-        {
-            case wxPENSTYLE_STIPPLE:
-            case wxPENSTYLE_STIPPLE_MASK:
-            case wxPENSTYLE_STIPPLE_MASK_OPAQUE:
-            {
-                wxpen.SetStipple(info.GetStipple());
-                break;
-            }
-            default:
-                break;
-        }
-
-        return wxpen.GetHandle();
-    }
-    QPen m_pen;
-
-    wxDECLARE_NO_COPY_CLASS(wxQtPenData);
-};
-
-class WXDLLIMPEXP_CORE wxQtBitmapData : public wxGraphicsBitmapData
-{
-public:
-    wxQtBitmapData(wxGraphicsRenderer* renderer, QPixmap* pixmap)
-        : wxGraphicsBitmapData(renderer),
-          m_pixmap(pixmap)
-    {
-    }
-
-    wxQtBitmapData(wxGraphicsRenderer* renderer, const wxBitmap& bmp)
-        : wxGraphicsBitmapData(renderer),
-          m_pixmap(bmp.GetHandle())
-    {
-    }
-
-    QPixmap* GetPixmap() const
-    {
-        return m_pixmap;
-    }
-
-    virtual void* GetNativeBitmap() const wxOVERRIDE
-    {
-        return m_pixmap;
-    }
-
-    static const QPixmap* GetPixmapFromBitmap(const wxGraphicsBitmap& bitmap)
-    {
-        const wxQtBitmapData* const
-            data = static_cast<const wxQtBitmapData*>(bitmap.GetBitmapData());
-        return data->GetPixmap();
-    }
-
-
-#if wxUSE_IMAGE
-    wxImage DoConvertToImage() const
-    {
-        wxBitmap bitmap(*m_pixmap);
-        return bitmap.ConvertToImage();
-    }
-#endif // wxUSE_IMAGE
-
-private:
-    QPixmap* m_pixmap;
-
-    wxDECLARE_NO_COPY_CLASS(wxQtBitmapData);
-};
 
 
 class WXDLLIMPEXP_CORE wxQtMatrixData : public wxGraphicsMatrixData
@@ -374,6 +229,182 @@ private:
     QTransform* m_transform;
 
     wxDECLARE_NO_COPY_CLASS(wxQtMatrixData);
+};
+
+class WXDLLIMPEXP_CORE wxQtBrushData : public wxGraphicsBrushData
+{
+public:
+    wxQtBrushData(wxGraphicsRenderer* renderer)
+        : wxGraphicsBrushData(renderer)
+    {
+    }
+
+    wxQtBrushData(wxGraphicsRenderer* renderer, const wxBrush& wxbrush)
+        : wxGraphicsBrushData(renderer),
+          m_brush(wxbrush.GetHandle())
+    {
+    }
+
+    void CreateLinearGradientBrush(wxDouble x1, wxDouble y1,
+                                   wxDouble x2, wxDouble y2,
+                                   const wxGraphicsGradientStops& stops)
+    {
+        QLinearGradient gradient(x1, y1, x2, y2);
+        SetStops(gradient, stops);
+        m_brush = QBrush(gradient);
+    }
+
+    void CreateRadialGradientBrush(wxDouble xo, wxDouble yo,
+                                   wxDouble xc, wxDouble yc,
+                                   wxDouble radius,
+                                   const wxGraphicsGradientStops& stops)
+    {
+        QRadialGradient gradient(QPointF(xc, yc), radius, QPointF(xo, yo));
+        SetStops(gradient, stops);
+        m_brush = QBrush(gradient);
+    }
+    void* GetNativeBrush() const
+    {
+        return (void*)(&m_brush);
+    };
+    void Transform(const wxGraphicsMatrixData* matrix)
+    {
+        const wxQtMatrixData* qmatrix = static_cast<const wxQtMatrixData*>(matrix);
+        m_brush.setTransform(qmatrix->GetQTransform());
+    };
+    const QBrush& getBrush() const
+    {
+        return m_brush;
+    }
+
+private:
+    static void
+    SetStops(QGradient& gradient, const wxGraphicsGradientStops& stops)
+    {
+        QGradientStops qstops;
+        for ( size_t i = 0; i < stops.GetCount(); ++i )
+        {
+            const wxGraphicsGradientStop stop = stops.Item(i);
+            qstops.append(QGradientStop(stop.GetPosition(),
+                                        stop.GetColour().GetQColor()));
+        }
+
+        gradient.setStops(qstops);
+    }
+
+    QBrush m_brush;
+
+    wxDECLARE_NO_COPY_CLASS(wxQtBrushData);
+};
+
+class WXDLLIMPEXP_CORE wxQtPenData : public wxGraphicsPenData
+{
+public:
+    wxQtPenData(wxGraphicsRenderer* renderer, const wxGraphicsPenInfo& info)
+        : wxGraphicsPenData(renderer),
+          m_pen(CreatePenFromInfo(info))
+    {
+    }
+    wxDouble GetWidth() const
+    {
+        return m_pen.widthF();
+    }
+    const QPen& GetPen() const
+    {
+        return m_pen;
+    }
+
+private:
+    static QPen CreatePenFromInfo(const wxGraphicsPenInfo& info)
+    {
+        wxPen wxpen(info.GetColour(), info.GetWidth(), info.GetStyle());
+        wxpen.SetDashes(info.GetDashCount(), info.GetDash());
+        wxpen.SetJoin(info.GetJoin());
+        wxpen.SetCap(info.GetCap());
+        switch ( info.GetStyle() )
+        {
+            case wxPENSTYLE_STIPPLE:
+            case wxPENSTYLE_STIPPLE_MASK:
+            case wxPENSTYLE_STIPPLE_MASK_OPAQUE:
+            {
+                wxpen.SetStipple(info.GetStipple());
+                break;
+            }
+            default:
+                break;
+        }
+
+        return wxpen.GetHandle();
+    }
+    QPen m_pen;
+
+    wxDECLARE_NO_COPY_CLASS(wxQtPenData);
+};
+
+class WXDLLIMPEXP_CORE wxQtBitmapData : public wxGraphicsBitmapData
+{
+public:
+    wxQtBitmapData(wxGraphicsRenderer* renderer, QPixmap* pixmap)
+        : wxGraphicsBitmapData(renderer),
+          m_pixmap(pixmap), m_owner(false)
+    {
+    }
+
+    wxQtBitmapData(wxGraphicsRenderer* renderer, const wxBitmap& bmp)
+        : wxGraphicsBitmapData(renderer),
+          m_pixmap(bmp.GetHandle()), m_owner(false)
+    {
+    }
+    wxQtBitmapData(wxGraphicsRenderer* renderer, int w, int h, double scale /*= 1*/)
+        : wxGraphicsBitmapData(renderer),
+        m_pixmap(new QPixmap(w, h)), m_owner(true)
+    {
+        m_scaleFactor = scale;
+    }
+    ~wxQtBitmapData()
+    {
+        if (m_owner)
+            delete m_pixmap;
+    }
+
+    QPixmap* GetPixmap() const
+    {
+        return m_pixmap;
+    }
+
+    virtual void* GetNativeBitmap() const wxOVERRIDE
+    {
+        return m_pixmap;
+    }
+
+    static const QPixmap* GetPixmapFromBitmap(const wxGraphicsBitmap& bitmap)
+    {
+        const wxQtBitmapData* const
+            data = static_cast<const wxQtBitmapData*>(bitmap.GetBitmapData());
+        return data->GetPixmap();
+    }
+    virtual int GetWidth() const wxOVERRIDE
+    {
+        return m_pixmap->width();
+    }
+    virtual int GetHeight() const wxOVERRIDE
+    {
+        return m_pixmap->height();
+    }
+
+#if wxUSE_IMAGE
+    wxImage DoConvertToImage() const
+    {
+        wxBitmap bitmap(*m_pixmap);
+        return bitmap.ConvertToImage();
+    }
+#endif // wxUSE_IMAGE
+
+private:
+    QPixmap* m_pixmap;
+    bool m_owner;
+
+    wxDECLARE_NO_COPY_CLASS(wxQtBitmapData);
 };
 
 class wxQtFontData : public wxGraphicsObjectRefData
@@ -609,11 +640,50 @@ public:
         if ( h ) *h = boundingRect.height();
     }
 
+    virtual void GetWidenedBox(const wxGraphicsPenData* pen,
+                               const wxGraphicsMatrixData* matrix,
+                               wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE
+    {
+        const wxQtPenData* qpen = static_cast<const wxQtPenData*>(pen);
+        const wxQtMatrixData*
+            qmatrix = static_cast<const wxQtMatrixData*>(matrix);
+
+        QPainterPathStroker pathStroker(qpen->GetPen());
+        QPainterPath qpath =
+            qmatrix->GetQTransform().map(pathStroker.createStroke(*m_path));
+
+        QRectF boundingRect = qpath.controlPointRect();
+
+        if (!boundingRect.isValid())
+            boundingRect = QRectF();
+
+        if (x) *x = boundingRect.left();
+        if (y) *y = boundingRect.top();
+        if (w) *w = boundingRect.width();
+        if (h) *h = boundingRect.height();
+    }
+
     virtual bool
     Contains(wxDouble x, wxDouble y,
              wxPolygonFillMode /*fillStyle = wxWINDING_RULE*/) const wxOVERRIDE
     {
         return m_path->contains(QPointF(x, y));
+    }
+    virtual bool OutlineContains(wxDouble x,
+                                 wxDouble y,
+                                 const wxGraphicsPenData* pen) const wxOVERRIDE
+    {
+        const wxQtPenData* qpen = static_cast<const wxQtPenData*>(pen);
+        QPainterPathStroker pathStroker(qpen->GetPen());
+        QPainterPath qpath = pathStroker.createStroke(*m_path);
+        return qpath.contains(QPointF(x, y));
+    }
+
+    virtual void ConvertToStrokePath(const wxGraphicsPenData* pen) wxOVERRIDE
+    {
+        const wxQtPenData* qpen = static_cast<const wxQtPenData*>(pen);
+        QPainterPathStroker pathStroker(qpen->GetPen());
+        *m_path = pathStroker.createStroke(*m_path);
     }
 
 private:
@@ -931,6 +1001,16 @@ public:
     {
         DoDrawBitmap(bmp, x, y, w, h, true);
     }
+    virtual void
+    DrawBitmap(const wxGraphicsBitmap &bmp,
+               const wxRect2DDouble& rcSrc, 
+               const wxRect2DDouble& rcDest) wxOVERRIDE
+    {
+        const QPixmap* pixmap = wxQtBitmapData::GetPixmapFromBitmap(bmp);
+        QRectF qrcSrc(rcSrc.m_x, rcSrc.m_y, rcSrc.m_width, rcSrc.m_height);
+        QRectF qrcDest(rcDest.m_x, rcDest.m_y, rcDest.m_width, rcDest.m_height);
+        m_qtPainter->drawPixmap(qrcDest, *pixmap, qrcSrc);
+    }
 
     virtual void
     DrawIcon(const wxIcon& icon,
@@ -1112,6 +1192,9 @@ public:
 
     virtual wxGraphicsContext* CreateContextFromNativeWindow(void* window) wxOVERRIDE;
 
+    virtual wxGraphicsContext * 
+        CreateContextFromBitmap(wxGraphicsBitmap& image) wxOVERRIDE;
+
 #if wxUSE_IMAGE
     virtual wxGraphicsContext* CreateContextFromImage(wxImage& image) wxOVERRIDE;
 #endif // wxUSE_IMAGE
@@ -1155,6 +1238,8 @@ public:
 
     // create a native bitmap representation
     virtual wxGraphicsBitmap CreateBitmap(const wxBitmap& bitmap) wxOVERRIDE;
+    virtual wxGraphicsBitmap CreateBitmap(int w, int h, wxDouble scale = 1) wxOVERRIDE;
+
 #if wxUSE_IMAGE
     virtual wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) wxOVERRIDE;
     virtual wxImage CreateImageFromBitmap(const wxGraphicsBitmap& bmp) wxOVERRIDE;
@@ -1209,6 +1294,13 @@ wxGraphicsContext*
 wxQtGraphicsRenderer::CreateContextFromNativeWindow(void* window)
 {
     return new wxQtGraphicsContext(this, static_cast<QWidget*>(window));
+}
+
+wxGraphicsContext * 
+wxQtGraphicsRenderer::CreateContextFromBitmap(wxGraphicsBitmap& image)
+{
+    QPixmap* pixmap =const_cast<QPixmap*>(wxQtBitmapData::GetPixmapFromBitmap(image));
+    return new wxQtGraphicsContext(this, pixmap);
 }
 
 #if wxUSE_IMAGE
@@ -1323,6 +1415,17 @@ wxGraphicsBitmap wxQtGraphicsRenderer::CreateBitmap(const wxBitmap& bmp)
     if ( bmp.IsOk() )
     {
         p.SetRefData(new wxQtBitmapData(this, bmp));
+    }
+    return p;
+}
+
+wxGraphicsBitmap
+wxQtGraphicsRenderer::CreateBitmap(int w, int h, wxDouble scale /*= 1*/)
+{
+    wxGraphicsBitmap p;
+    if (w > 0 && h > 0)
+    {
+        p.SetRefData(new wxQtBitmapData(this, w, h, scale));
     }
     return p;
 }
