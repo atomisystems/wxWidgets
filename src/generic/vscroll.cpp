@@ -384,7 +384,15 @@ void wxVarScrollHelperBase::UpdateScrollbar()
     }
 
     // see how many units can we fit on screen
+#ifndef __WXMAC__
     const wxCoord sWindow = GetOrientationTargetSize();
+#else
+    int nBorder = 0;
+    if (m_win && (m_win->GetWindowStyle() & wxBORDER_MASK))
+        nBorder = 2;
+    //take border into target size on MacOS
+    const wxCoord sWindow = GetOrientationTargetSize() + nBorder;
+#endif
 
     // do vertical calculations
     wxCoord s = 0;

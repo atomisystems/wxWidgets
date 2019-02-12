@@ -146,17 +146,7 @@ void wxAutoScrollTimer::Notify()
         {
             // and then send a pseudo mouse-move event to refresh the selection
             wxMouseEvent event2(wxEVT_MOTION);
-            event2.SetPosition(wxGetMousePosition());
-
-            // the mouse event coordinates should be client, not screen as
-            // returned by wxGetMousePosition
-            wxWindow *parentTop = m_win;
-            while ( parentTop->GetParent() )
-                parentTop = parentTop->GetParent();
-            wxPoint ptOrig = parentTop->GetPosition();
-            event2.m_x -= ptOrig.x;
-            event2.m_y -= ptOrig.y;
-
+            event2.SetPosition(m_win->ScreenToClient(wxGetMousePosition()));
             event2.SetEventObject(m_win);
 
             wxMouseState mouseState = wxGetMouseState();

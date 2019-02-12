@@ -82,9 +82,8 @@ public:
     virtual wxSize GetBestSizeForParentSize(const wxSize& parentSize) const wxOVERRIDE;
 
     long GetFlags() { return m_flags; }
-
+    void SetFlags(long lFlag) { m_flags = lFlag; }
     void HideIfExpanded();
-
 protected:
     virtual wxSize DoGetBestSize() const wxOVERRIDE;
     virtual wxSize GetPanelSizerBestSize() const;
@@ -105,7 +104,8 @@ protected:
     void OnMouseEnterChild(wxMouseEvent& evt);
     void OnMouseLeave(wxMouseEvent& evt);
     void OnMouseLeaveChild(wxMouseEvent& evt);
-    void OnMouseClick(wxMouseEvent& evt);
+    void OnMouseLeftDown(wxMouseEvent& evt);
+    void OnMouseLeftUp(wxMouseEvent& event);
     void OnMotion(wxMouseEvent& evt);
     void OnKillFocus(wxFocusEvent& evt);
     void OnChildKillFocus(wxFocusEvent& evt);

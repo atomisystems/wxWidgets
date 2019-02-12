@@ -2882,7 +2882,7 @@ void wxAuiToolBar::OnMotion(wxMouseEvent& evt)
 
     // start a drag event
     if (!m_dragging && button_pressed &&
-        abs(evt.GetX() - m_actionPos.x) + abs(evt.GetY() - m_actionPos.y) > 5)
+        abs(evt.GetX() - m_actionPos.x) + abs(evt.GetY() - m_actionPos.y) > 5 && m_actionItem)
     {
         // TODO: sending this event only makes sense if there is an 'END_DRAG'
         // event sent sometime in the future (see OnLeftUp())

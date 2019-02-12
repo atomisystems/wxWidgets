@@ -975,6 +975,115 @@ wxSize wxRibbonToolBar::GetBestSizeForParentSize(const wxSize& parentSize) const
     return bestSize;
 }
 
+wxRect wxRibbonToolBar::GetToolRect(int nToolIndex)
+{
+    wxRect rcButton;
+    // Find the group which contains the tool
+    size_t group_count = m_groups.GetCount();
+    size_t g, t;
+    int nCount = 0;
+    for (g = 0; g < group_count; ++g)
+    {
+        wxRibbonToolBarToolGroup* group = m_groups.Item(g);
+        size_t tool_count = group->tools.GetCount();
+        for (t = 0; t < tool_count; ++t)
+        {
+            wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+            if (nToolIndex == nCount)
+            {
+                rcButton.SetPosition(group->position + tool->position);
+                rcButton.SetSize(tool->size);
+                g = group_count;
+                break;
+            }
+            nCount++;
+        }
+    }
+    return rcButton;
+}
+
+int wxRibbonToolBar::GetToolIndex(wxRibbonToolBarToolBase* pItem) const
+{
+    int nRet = -1;
+    // Find the group which contains the tool
+    size_t group_count = m_groups.GetCount();
+    size_t g, t;
+    int nCount = 0;
+    for (g = 0; g < group_count; ++g)
+    {
+        wxRibbonToolBarToolGroup* group = m_groups.Item(g);
+        size_t tool_count = group->tools.GetCount();
+        for (t = 0; t < tool_count; ++t)
+        {
+            wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+            if (tool == pItem)
+            {
+                nRet = nCount;
+                break;
+            }
+            nCount++;
+        }
+    }
+    return nRet;
+}
+
+wxRibbonToolBarToolBase* wxRibbonToolBar::GetToolByIndex(int nIndex) const
+{
+    wxRibbonToolBarToolBase* pRet = NULL;
+    // Find the group which contains the tool
+    size_t group_count = m_groups.GetCount();
+    size_t g, t;
+    int nCount = 0;
+    for (g = 0; g < group_count; ++g)
+    {
+        wxRibbonToolBarToolGroup* group = m_groups.Item(g);
+        size_t tool_count = group->tools.GetCount();
+        for (t = 0; t < tool_count; ++t)
+        {
+            wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+            if (nIndex == nCount)
+            {
+                pRet = tool;
+                break;
+            }
+            nCount++;
+        }
+    }
+    return pRet;
+}
+
+wxRibbonToolBarToolBase* wxRibbonToolBar::GetToolByPosition(const wxPoint& pt) const
+{
+    wxPoint pos(pt);
+    wxRibbonToolBarToolBase *pHoverTool = NULL;
+
+    size_t group_count = m_groups.GetCount();
+    size_t g, t;
+    for (g = 0; g < group_count; ++g)
+    {
+        wxRibbonToolBarToolGroup* group = m_groups.Item(g);
+        if (group->position.x <= pos.x && pos.x < group->position.x + group->size.x
+            && group->position.y <= pos.y && pos.y < group->position.y + group->size.y)
+        {
+            size_t tool_count = group->tools.GetCount();
+            pos -= group->position;
+            for (t = 0; t < tool_count; ++t)
+            {
+                wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+                if (tool->position.x <= pos.x && pos.x < tool->position.x + tool->size.x
+                    && tool->position.y <= pos.y && pos.y < tool->position.y + tool->size.y)
+                {
+                    pos -= tool->position;
+                    pHoverTool = tool;
+                    break;
+                }
+            }
+            break;
+        }
+    }
+    return pHoverTool;
+}
+
 wxSize wxRibbonToolBar::DoGetBestSize() const
 {
     return GetMinSize();
@@ -1233,6 +1342,65 @@ bool wxRibbonToolBarEvent::PopupMenu(wxMenu* menu)
         }
     }
     return m_bar->PopupMenu(menu, pos);
+}
+
+wxPoint wxRibbonToolBarEvent::GetPopupPosition()
+{
+    wxPoint pos = wxDefaultPosition;
+    if(m_bar->m_active_tool)
+    {
+        // Find the group which contains the tool
+        size_t group_count = m_bar->m_groups.GetCount();
+        size_t g, t;
+        for(g = 0; g < group_count; ++g)
+        {
+            wxRibbonToolBarToolGroup* group = m_bar->m_groups.Item(g);
+            size_t tool_count = group->tools.GetCount();
+            for(t = 0; t < tool_count; ++t)
+            {
+                wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+                if(tool == m_bar->m_active_tool)
+                {
+                    pos = group->position;
+                    pos += tool->position;
+                    pos.y += tool->size.GetHeight();
+                    g = group_count;
+                    break;
+                }
+            }
+        }
+    }
+    return pos;
+}
+
+wxRect wxRibbonToolBarEvent::GetButtonScreenRect()
+{
+    wxRect rcButton;
+    if(m_bar && m_bar->m_active_tool)
+    {
+        // Find the group which contains the tool
+        size_t group_count = m_bar->m_groups.GetCount();
+        size_t g, t;
+        for(g = 0; g < group_count; ++g)
+        {
+            wxRibbonToolBarToolGroup* group = m_bar->m_groups.Item(g);
+            size_t tool_count = group->tools.GetCount();
+            for(t = 0; t < tool_count; ++t)
+            {
+                wxRibbonToolBarToolBase* tool = group->tools.Item(t);
+                if(tool == m_bar->m_active_tool)
+                {
+                    rcButton.SetPosition(group->position + tool->position);
+                    rcButton.SetSize(tool->size);
+                    g = group_count;
+                    break;
+                }
+            }
+        }
+    }
+    if (m_bar)
+        rcButton.SetTopLeft(m_bar->ClientToScreen(rcButton.GetTopLeft()));
+    return rcButton;
 }
 
 #endif // wxUSE_RIBBON

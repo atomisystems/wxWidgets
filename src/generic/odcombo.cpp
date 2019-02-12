@@ -446,7 +446,14 @@ void wxVListBoxComboPopup::OnMouseMove(wxMouseEvent& event)
         if ( y < 0 )
         {
             // Only change selection if item is fully visible
-            if ( (y + fromBottom) >= 0 )
+#ifdef __WXMAC__
+            int nBorder = 0;
+            if (m_win && (m_win->GetWindowStyle() & wxBORDER_MASK))
+                nBorder = 2;
+            if ((y + nBorder + fromBottom) >= 0) ////wxVListBoxComboPopup::GetAdjustedSize (line 828)
+#else
+            if ((y + fromBottom) >= 0)
+#endif
             {
                 wxVListBox::SetSelection((int)line);
                 return;

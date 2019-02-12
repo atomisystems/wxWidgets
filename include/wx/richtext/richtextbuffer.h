@@ -1756,17 +1756,17 @@ public:
     /**
         Constructor taking a wxTextAttr.
     */
-    wxRichTextAttr(const wxTextAttr& attr) { wxTextAttr::Copy(attr); }
+    wxRichTextAttr(const wxTextAttr& attr);
 
     /**
         Copy constructor.
     */
-    wxRichTextAttr(const wxRichTextAttr& attr): wxTextAttr() { Copy(attr); }
+    wxRichTextAttr(const wxRichTextAttr& attr);
 
     /**
         Default constructor.
     */
-    wxRichTextAttr() {}
+    wxRichTextAttr();
 
     /**
         Copy function.
@@ -1781,7 +1781,7 @@ public:
     /**
         Assignment operator.
     */
-    void operator=(const wxTextAttr& attr) { wxTextAttr::Copy(attr); }
+    void operator=(const wxTextAttr& attr);
 
     /**
         Equality test.
@@ -1830,7 +1830,30 @@ public:
     */
     bool IsDefault() const { return (GetFlags() == 0) && m_textBoxAttr.IsDefault(); }
 
+    void SetTextColorIndex(int nIndex) { m_textColorIndex = nIndex;  AddFlag(wxTEXT_ATTR_TEXT_COLOUR); }
+    int GetTextColorIndex() const { return m_textColorIndex; }
+    void SetTextColorBrightness(int nBrightness) { m_textColorBrightness = nBrightness; }
+    int GetTextColorBrightness() const { return m_textColorBrightness; }
+
+    void SetBackgroundColorIndex(int nIndex) { m_backgroundColorIndex = nIndex; AddFlag(wxTEXT_ATTR_BACKGROUND_COLOUR); }
+    int GetBackgroundColorIndex() const { return m_backgroundColorIndex; }
+    void SetBackgroundColorBrightness(int nBrightness) { m_backgroundColorBrightness = nBrightness; }
+    int GetBackgroundColorBrightness()  const { return m_backgroundColorBrightness; }
+
+    void SetFontFaceNameIndex(int nIndex) { m_fontFaceNameIndex = nIndex; AddFlag(wxTEXT_ATTR_FONT_FACE); }
+    int GetFontFaceNameIndex() const { return m_fontFaceNameIndex; }
+
+    bool HasTextColour() const { return HasFlag(wxTEXT_ATTR_TEXT_COLOUR); }
+    bool HasBackgroundColour() const { return HasFlag(wxTEXT_ATTR_BACKGROUND_COLOUR); }
+
+    static bool SplitParaCharStyles(const wxRichTextAttr& style, wxRichTextAttr& parStyle, wxRichTextAttr& charStyle);
+
     wxTextBoxAttr    m_textBoxAttr;
+    int m_textColorIndex;
+    int m_textColorBrightness;
+    int m_backgroundColorIndex;
+    int m_backgroundColorBrightness;
+    int m_fontFaceNameIndex;
 };
 
 WX_DECLARE_USER_EXPORTED_OBJARRAY(wxRichTextAttr, wxRichTextAttrArray, WXDLLIMPEXP_RICHTEXT);
@@ -3304,22 +3327,22 @@ public:
     /**
         Submits a command to insert paragraphs.
     */
-    bool InsertParagraphsWithUndo(wxRichTextBuffer* buffer, long pos, const wxRichTextParagraphLayoutBox& paragraphs, wxRichTextCtrl* ctrl, int flags = 0);
+    virtual bool InsertParagraphsWithUndo(wxRichTextBuffer* buffer, long pos, const wxRichTextParagraphLayoutBox& paragraphs, wxRichTextCtrl* ctrl, int flags = 0);
 
     /**
         Submits a command to insert the given text.
     */
-    bool InsertTextWithUndo(wxRichTextBuffer* buffer, long pos, const wxString& text, wxRichTextCtrl* ctrl, int flags = 0);
+    virtual bool InsertTextWithUndo(wxRichTextBuffer* buffer, long pos, const wxString& text, wxRichTextCtrl* ctrl, int flags = 0);
 
     /**
         Submits a command to insert the given text.
     */
-    bool InsertNewlineWithUndo(wxRichTextBuffer* buffer, long pos, wxRichTextCtrl* ctrl, int flags = 0);
+    virtual bool InsertNewlineWithUndo(wxRichTextBuffer* buffer, long pos, wxRichTextCtrl* ctrl, int flags = 0);
 
     /**
         Submits a command to insert the given image.
     */
-    bool InsertImageWithUndo(wxRichTextBuffer* buffer, long pos, const wxRichTextImageBlock& imageBlock,
+    virtual bool InsertImageWithUndo(wxRichTextBuffer* buffer, long pos, const wxRichTextImageBlock& imageBlock,
                                                         wxRichTextCtrl* ctrl, int flags, const wxRichTextAttr& textAttr);
 
     /**
@@ -3327,7 +3350,7 @@ public:
 
         @see wxRichTextField, wxRichTextFieldType, wxRichTextFieldTypeStandard
     */
-    wxRichTextField* InsertFieldWithUndo(wxRichTextBuffer* buffer, long pos, const wxString& fieldType,
+    virtual wxRichTextField* InsertFieldWithUndo(wxRichTextBuffer* buffer, long pos, const wxString& fieldType,
                                                         const wxRichTextProperties& properties,
                                                         wxRichTextCtrl* ctrl, int flags,
                                                         const wxRichTextAttr& textAttr);
@@ -3342,12 +3365,12 @@ public:
     /**
         Inserts an object.
     */
-    wxRichTextObject* InsertObjectWithUndo(wxRichTextBuffer* buffer, long pos, wxRichTextObject *object, wxRichTextCtrl* ctrl, int flags = 0);
+    virtual wxRichTextObject* InsertObjectWithUndo(wxRichTextBuffer* buffer, long pos, wxRichTextObject *object, wxRichTextCtrl* ctrl, int flags = 0);
 
     /**
         Submits a command to delete this range.
     */
-    bool DeleteRangeWithUndo(const wxRichTextRange& range, wxRichTextCtrl* ctrl, wxRichTextBuffer* buffer);
+    virtual bool DeleteRangeWithUndo(const wxRichTextRange& range, wxRichTextCtrl* ctrl, wxRichTextBuffer* buffer);
 
     /**
         Draws the floating objects in this buffer.
@@ -5102,6 +5125,9 @@ protected:
 class WXDLLIMPEXP_FWD_RICHTEXT wxRichTextCommand;
 class WXDLLIMPEXP_FWD_RICHTEXT wxRichTextAction;
 
+
+typedef int(*wxRichTextTextWrapFunction)(const wxString& str);
+
 /**
     @class wxRichTextBuffer
 
@@ -5853,6 +5879,13 @@ public:
     */
     static bool GetFloatingLayoutMode() { return sm_floatingLayoutMode; }
 
+    /**
+        wxWidgets provide a limited function to find wrap-able position in a string so we may need to provide a custom function
+    */
+    static void SetTextWrapFunction(wxRichTextTextWrapFunction f) { sm_funcTextWrap = f;  }
+
+    static wxRichTextTextWrapFunction GetTextWrapFunction() { return sm_funcTextWrap; }
+
 protected:
 
     /// Command processor
@@ -5917,7 +5950,12 @@ protected:
 
     /// Dimension scale for reducing redundant whitespace when editing
     double                  m_dimensionScale;
+
+
+
+    static wxRichTextTextWrapFunction sm_funcTextWrap;
 };
+
 
 /**
     @class wxRichTextCell
@@ -6420,12 +6458,12 @@ public:
     /**
         Performs the action.
     */
-    bool Do();
+    virtual bool Do();
 
     /**
         Undoes the action.
     */
-    bool Undo();
+    virtual bool Undo();
 
     /**
         Updates the control appearance, optimizing if possible given information from the call to Layout.
@@ -7065,7 +7103,7 @@ WXDLLIMPEXP_RICHTEXT wxString wxRichTextDecimalToRoman(long n);
 
 // Collects the attributes that are common to a range of content, building up a note of
 // which attributes are absent in some objects and which clash in some objects.
-WXDLLIMPEXP_RICHTEXT void wxTextAttrCollectCommonAttributes(wxTextAttr& currentStyle, const wxTextAttr& attr, wxTextAttr& clashingAttr, wxTextAttr& absentAttr);
+WXDLLIMPEXP_RICHTEXT void wxTextAttrCollectCommonAttributes(wxRichTextAttr& currentStyle, const wxRichTextAttr& attr, wxRichTextAttr& clashingAttr, wxRichTextAttr& absentAttr);
 
 WXDLLIMPEXP_RICHTEXT void wxRichTextModuleInit();
 

@@ -1435,6 +1435,8 @@ wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
         }
     }
 
+    /* wxFormBuilder doesn't check these flags well when generating code, it'd better to comment out these checks*/
+#if 0
     const int flags = item->GetFlag();
     if ( flags & wxEXPAND )
     {
@@ -1446,7 +1448,7 @@ wxSizerItem *wxGridSizer::DoInsert(size_t index, wxSizerItem *item)
             wxS("wxEXPAND flag will be overridden by alignment flags")
         );
     }
-
+#endif
     return wxSizer::DoInsert(index, item);
 }
 
@@ -2050,6 +2052,8 @@ void wxFlexGridSizer::RemoveGrowableRow( size_t idx )
 
 wxSizerItem *wxBoxSizer::DoInsert(size_t index, wxSizerItem *item)
 {
+    /* wxFormBuilder doesn't check these flags well when generating code, it'd better to comment out these checks*/
+#if 0
     const int flags = item->GetFlag();
     if ( IsVertical() )
     {
@@ -2105,7 +2109,7 @@ wxSizerItem *wxBoxSizer::DoInsert(size_t index, wxSizerItem *item)
             );
         }
     }
-
+#endif
     return wxSizer::DoInsert(index, item);
 }
 

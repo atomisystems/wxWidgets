@@ -45,14 +45,32 @@ public:
     bool IsEmpty() const;
     unsigned int GetCount() const;
     wxRibbonGalleryItem* GetItem(unsigned int n);
-    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id);
-    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id, void* clientData);
-    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id, wxClientData* clientData);
+    wxRibbonGalleryItem* GetItemByID(int nID);
+    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id, void* clientData, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    wxRibbonGalleryItem* Append(const wxBitmap& bitmap, int id, wxClientData* clientData, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    //if pos < 0 -> append
+    wxRibbonGalleryItem* Insert(int pos, const wxBitmap& bitmap, int id, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    wxRibbonGalleryItem* Insert(int pos, const wxBitmap& bitmap, int id, void* clientData, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    wxRibbonGalleryItem* Insert(int pos, const wxBitmap& bitmap, int id, wxClientData* clientData, const wxString& strName = wxEmptyString, const wxString& strHelp = wxEmptyString);
+    void Remove(unsigned int pos);
+    int RemoveItemByID(int nID);
 
     void SetItemClientObject(wxRibbonGalleryItem* item, wxClientData* data);
     wxClientData* GetItemClientObject(const wxRibbonGalleryItem* item) const;
     void SetItemClientData(wxRibbonGalleryItem* item, void* data);
     void* GetItemClientData(const wxRibbonGalleryItem* item) const;
+    int GetItemId(const wxRibbonGalleryItem* item) const;
+    void SetItemName(wxRibbonGalleryItem* item, const wxString& strName);
+    wxString GetItemName(wxRibbonGalleryItem* item) const;
+    void SetItemHelpString(wxRibbonGalleryItem* item, const wxString& strHelp);
+    wxString GetItemHelpString(wxRibbonGalleryItem* item) const;
+    void SetItemBitmap(wxRibbonGalleryItem* item, const wxBitmap& bitmap);
+    wxBitmap GetItemBitmap(wxRibbonGalleryItem* item) const;
+    void SetItemDisabledBitmap(wxRibbonGalleryItem* item, const wxBitmap& bitmap);
+    wxBitmap GetItemDisabledBitmap(wxRibbonGalleryItem* item) const;
+    void SetItemEnabled(wxRibbonGalleryItem* item, bool bEnabled);
+    bool GetItemEnabled(wxRibbonGalleryItem* item) const;
 
     void SetSelection(wxRibbonGalleryItem* item);
     wxRibbonGalleryItem* GetSelection() const;
@@ -70,7 +88,16 @@ public:
     virtual bool ScrollLines(int lines) wxOVERRIDE;
     bool ScrollPixels(int pixels);
     void EnsureVisible(const wxRibbonGalleryItem* item);
+    void AllowSelectItemByMouse(bool bAllow = true);
+    void SetItemsPerRow(int nMinItems, int nBestItems);
+    wxSize GetItemSize() const;
+    void EnableAllItems();
+    void DisableAllItems();
 
+    //for accessible
+    int GetItemIndex(wxRibbonGalleryItem* pItem);
+    wxRect GetItemRect(int nItemIndex) const;
+    wxRibbonGalleryItem* FindItemByPos(const wxPoint& pt);
 protected:
     wxBorder GetDefaultBorder() const wxOVERRIDE { return wxBORDER_NONE; }
     void CommonInit(long style);
@@ -115,6 +142,9 @@ protected:
     wxRibbonGalleryButtonState m_down_button_state;
     wxRibbonGalleryButtonState m_extension_button_state;
     bool m_hovered;
+    bool m_bAllowMouseSelection;
+    int m_nItemsPerRowMin;
+    int m_nItemsPerRowBest;
 
 #ifndef SWIG
     wxDECLARE_CLASS(wxRibbonGallery);

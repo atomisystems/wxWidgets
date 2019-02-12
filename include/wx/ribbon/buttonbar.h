@@ -126,11 +126,19 @@ public:
     wxClientData* GetItemClientObject(const wxRibbonButtonBarButtonBase* item) const;
     void SetItemClientData(wxRibbonButtonBarButtonBase* item, void* data);
     void* GetItemClientData(const wxRibbonButtonBarButtonBase* item) const;
-
+    void SetItemHelpString(wxRibbonButtonBarButtonBase* item, const wxString& strHelp);
+    wxString GetItemHelpString(wxRibbonButtonBarButtonBase* item) const;
+    void SetItemBitmaps(wxRibbonButtonBarButtonBase* item,
+                        const wxBitmap& bitmap,
+                        const wxBitmap& bitmap_small = wxNullBitmap,
+                        const wxBitmap& bitmap_disabled = wxNullBitmap,
+                        const wxBitmap& bitmap_small_disabled = wxNullBitmap);
+    void SetItemLabel(wxRibbonButtonBarButtonBase* item, const wxString& strItem);
     virtual size_t GetButtonCount() const;
     virtual wxRibbonButtonBarButtonBase *GetItem(size_t n) const;
     virtual wxRibbonButtonBarButtonBase *GetItemById(int id) const;
     virtual int GetItemId(wxRibbonButtonBarButtonBase *button) const;
+    wxString GetItemLabel(wxRibbonButtonBarButtonBase* button) const;
 
 
     virtual bool Realize() wxOVERRIDE;
@@ -165,7 +173,17 @@ public:
 
     void SetShowToolTipsForDisabled(bool show);
     bool GetShowToolTipsForDisabled() const;
+    void SetLayoutValid(bool bValue);
 
+    void SetSizeFlag(int nFlag);
+    int GetSizeFlag() const;
+    bool HasSizeFlag(int nFlag);
+
+    //for accessible
+    int GetButtonIndex(wxRibbonButtonBarButtonBase* pButton) const;
+    wxRect GetButtonRect(int nButtonIndex) const;
+    wxRibbonButtonBarButtonBase* GetButtonByPosition(const wxPoint& pt) const;
+    wxRibbonButtonBarButtonBase* GetButtonByIndex(int nButtonIndex) const;
 protected:
     friend class wxRibbonButtonBarEvent;
     virtual wxSize DoGetBestSize() const wxOVERRIDE;
@@ -213,7 +231,7 @@ protected:
     bool m_layouts_valid;
     bool m_lock_active_state;
     bool m_show_tooltips_for_disabled;
-
+    int m_flag_size_info;
 #ifndef SWIG
     wxDECLARE_CLASS(wxRibbonButtonBar);
     wxDECLARE_EVENT_TABLE();
@@ -245,6 +263,8 @@ public:
     void SetBar(wxRibbonButtonBar* bar) {m_bar = bar;}
     void SetButton(wxRibbonButtonBarButtonBase* button) { m_button = button; }
     bool PopupMenu(wxMenu* menu);
+    wxPoint GetPopupPosition();
+    wxRect GetButtonScreenRect();
 
 protected:
     wxRibbonButtonBar* m_bar;

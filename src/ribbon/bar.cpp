@@ -322,6 +322,17 @@ wxRibbonPage* wxRibbonBar::GetPage(int n)
     return m_pages.Item(n).page;
 }
 
+
+const wxRibbonPageTabInfo& wxRibbonBar::GetInfo(int n) const
+{
+    if (n < 0 || (size_t)n >= m_pages.GetCount())
+    {
+        static wxRibbonPageTabInfo info;
+        return info;
+    }
+    return m_pages.Item(n);
+}
+
 size_t wxRibbonBar::GetPageCount() const
 {
     return m_pages.GetCount();

@@ -45,10 +45,12 @@ wxMemoryDCImpl::wxMemoryDCImpl( wxMemoryDC *owner, wxDC * WXUNUSED(dc) )
 void wxMemoryDCImpl::Init()
 {
     m_ok = true;
-    SetBackground(*wxWHITE_BRUSH);
-    SetBrush(*wxWHITE_BRUSH);
-    SetPen(*wxBLACK_PEN);
-    SetFont(*wxNORMAL_FONT);
+    wxBrush whiteBrush = wxColour(255, 255, 255);
+    SetBackground(whiteBrush);
+    SetBrush(whiteBrush);
+    wxPen blackPen = wxColour(0, 0, 0);
+    SetPen(blackPen);
+    SetFont(wxFont(12, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL));
     m_ok = false;
 }
 

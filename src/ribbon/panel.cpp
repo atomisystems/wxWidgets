@@ -43,7 +43,8 @@ wxBEGIN_EVENT_TABLE(wxRibbonPanel, wxRibbonControl)
     EVT_KILL_FOCUS(wxRibbonPanel::OnKillFocus)
     EVT_LEAVE_WINDOW(wxRibbonPanel::OnMouseLeave)
     EVT_MOTION(wxRibbonPanel::OnMotion)
-    EVT_LEFT_DOWN(wxRibbonPanel::OnMouseClick)
+    EVT_LEFT_DOWN(wxRibbonPanel::OnMouseLeftDown)
+    EVT_LEFT_UP(wxRibbonPanel::OnMouseLeftUp)
     EVT_PAINT(wxRibbonPanel::OnPaint)
     EVT_SIZE(wxRibbonPanel::OnSize)
 wxEND_EVENT_TABLE()
@@ -359,6 +360,14 @@ wxSize wxRibbonPanel::GetBestSizeForParentSize(const wxSize& parentSize) const
             return overallSize;
         }
     }
+    else if (!GetSizer())
+    {
+        wxClientDC temp_dc((wxRibbonPanel*) this);
+        wxSize clientParentSize = m_art->GetPanelClientSize(temp_dc, this, parentSize, NULL);
+        wxSize childSize = GetNextSmallerSize(wxHORIZONTAL, clientParentSize);
+        wxSize overallSize = m_art->GetPanelSize(temp_dc, this, childSize, NULL);
+        return overallSize;
+    }
     return GetSize();
 }
 
@@ -406,6 +415,28 @@ wxSize wxRibbonPanel::DoGetNextSmallerSize(wxOrientation direction,
             {
                 smaller = ribbon_child->GetNextSmallerSize(direction, child_relative);
                 minimise = (smaller == child_relative);
+            }
+        }
+        else if (GetChildren().GetCount() > 1)
+        {
+            wxSize child_relative_tmp = child_relative;
+            int nChildIndex = GetChildren().GetCount() - 1;
+            for (wxWindowList::compatibility_iterator node = GetChildren().GetLast(); node; node = node->GetPrevious())
+            {
+                wxWindow* child = node->GetData();
+                wxRibbonControl* ribbon_child = wxDynamicCast(child, wxRibbonControl);
+                if (nChildIndex > 0)
+                {
+                    wxSize szBest = child->GetBestSize();
+                    child_relative_tmp.x -= szBest.x;
+                }
+                else
+                {
+                    wxSize child_larger = ribbon_child->GetNextSmallerSize(direction, child_relative_tmp);
+                    smaller.x = child_relative.x += (child_larger.x - child_relative_tmp.x);
+                    smaller.y = child_relative.y;
+                }
+                nChildIndex--;
             }
         }
 
@@ -525,6 +556,28 @@ wxSize wxRibbonPanel::DoGetNextLargerSize(wxOrientation direction,
                 larger = ribbon_child->GetNextLargerSize(direction, child_relative);
             }
         }
+        else if (GetChildren().GetCount() > 1)
+        {
+            wxSize child_relative_tmp = child_relative;
+            int nChildIndex = GetChildren().GetCount() - 1;
+            for (wxWindowList::compatibility_iterator node = GetChildren().GetLast(); node; node = node->GetPrevious())
+            {
+                wxWindow* child = node->GetData();
+                wxRibbonControl* ribbon_child = wxDynamicCast(child, wxRibbonControl);
+                if (nChildIndex > 0)
+                {
+                    wxSize szBest = child->GetBestSize();
+                    child_relative_tmp.x -= szBest.x;
+                }
+                else
+                {
+                    wxSize child_larger = ribbon_child->GetNextLargerSize(direction, child_relative_tmp);
+                    larger.x = child_relative.x + (child_larger.x - child_relative_tmp.x);
+                    larger.y = child_relative.y;
+                }
+                nChildIndex--;
+            }
+        }
 
         if(larger.IsFullySpecified()) // Use fallback if !(sizer/child = 1)
         {
@@ -597,7 +650,20 @@ wxSize wxRibbonPanel::GetMinNotMinimisedSize() const
         wxClientDC dc((wxRibbonPanel*) this);
         return m_art->GetPanelSize(dc, this, child->GetMinSize(), NULL);
     }
-
+    else if (GetChildren().GetCount() > 1)
+    {
+        wxSize szMin(0, 0);        
+        for (wxWindowList::compatibility_iterator node = GetChildren().GetLast(); node; node = node->GetPrevious())
+        {
+            wxWindow* child = node->GetData();
+            wxSize szChildMin = child->GetMinSize();
+            if (szMin.y < szChildMin.y)
+                szMin.y = szChildMin.y;
+            szMin.x += szChildMin.x;
+        }
+        wxClientDC dc((wxRibbonPanel*) this);
+        return m_art->GetPanelSize(dc, this, szMin, NULL);
+    }
     return wxRibbonControl::GetMinSize();
 }
 
@@ -646,7 +712,20 @@ wxSize wxRibbonPanel::DoGetBestSize() const
         wxClientDC dc((wxRibbonPanel*) this);
         return m_art->GetPanelSize(dc, this, child->GetBestSize(), NULL);
     }
-
+    else if (GetChildren().GetCount() > 1)
+    {
+        wxSize szBest(0, 0);        
+        for (wxWindowList::compatibility_iterator node = GetChildren().GetLast(); node; node = node->GetPrevious())
+        {
+            wxWindow* child = node->GetData();
+            wxSize szChildBest = child->GetBestSize();
+            if (szBest.y < szChildBest.y)
+                szBest.y = szChildBest.y;
+            szBest.x += szChildBest.x;
+        }
+        wxClientDC dc((wxRibbonPanel*) this);
+        return m_art->GetPanelSize(dc, this, szBest, NULL);
+    }
     return wxRibbonControl::DoGetBestSize();
 }
 
@@ -761,6 +840,27 @@ bool wxRibbonPanel::Layout()
         wxWindow* child = GetChildren().Item(0)->GetData();
         child->SetSize(position.x, position.y, size.GetWidth(), size.GetHeight());
     }
+    else if (GetChildren().GetCount() > 1)
+    {
+        int nChildIndex = GetChildren().GetCount() - 1;
+        for (wxWindowList::compatibility_iterator node = GetChildren().GetLast();
+            node;
+            node = node->GetPrevious())
+        {
+            wxWindow* child = node->GetData();
+            if (nChildIndex > 0)
+            {
+                wxSize szBest = child->GetBestSize();
+                child->SetSize(position.x + size.x - szBest.x, position.y, szBest.x, size.y);
+                size.x -= szBest.x;
+            }
+            else
+            {
+                child->SetSize(position.x, position.y, size.x, size.y);
+            }
+            nChildIndex--;
+        }
+    }
 
     if(HasExtButton())
         m_ext_button_rect = m_art->GetPanelExtButtonArea(dc, this, GetSize());
@@ -768,7 +868,7 @@ bool wxRibbonPanel::Layout()
     return true;
 }
 
-void wxRibbonPanel::OnMouseClick(wxMouseEvent& WXUNUSED(evt))
+void wxRibbonPanel::OnMouseLeftDown(wxMouseEvent& WXUNUSED(evt))
 {
     if(IsMinimised())
     {
@@ -781,13 +881,19 @@ void wxRibbonPanel::OnMouseClick(wxMouseEvent& WXUNUSED(evt))
             ShowExpanded();
         }
     }
-    else if(IsExtButtonHovered())
+}
+
+void wxRibbonPanel::OnMouseLeftUp(wxMouseEvent& event)
+{
+    if (IsExtButtonHovered())
     {
         wxRibbonPanelEvent notification(wxEVT_RIBBONPANEL_EXTBUTTON_ACTIVATED, GetId());
         notification.SetEventObject(this);
         notification.SetPanel(this);
         ProcessEvent(notification);
+        TestPositionForHover(wxPoint(-1, -1));
     }
+    event.Skip(true);
 }
 
 wxRibbonPanel* wxRibbonPanel::GetExpandedDummy()
@@ -918,6 +1024,7 @@ void wxRibbonPanel::OnKillFocus(wxFocusEvent& evt)
             HideExpanded();
         }
     }
+    TestPositionForHover(wxPoint(-1, -1));
 }
 
 void wxRibbonPanel::OnChildKillFocus(wxFocusEvent& evt)
@@ -948,6 +1055,7 @@ void wxRibbonPanel::OnChildKillFocus(wxFocusEvent& evt)
     {
         evt.Skip();
     }
+    TestPositionForHover(wxPoint(-1, -1));
 }
 
 bool wxRibbonPanel::HideExpanded()

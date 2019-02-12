@@ -157,6 +157,11 @@ public:
     // Finds the best width and height given the parent's width and height
     virtual wxSize GetBestSizeForParentSize(const wxSize& parentSize) const wxOVERRIDE;
 
+    //for accessible
+    wxRect GetToolRect(int nToolIndex);
+    int GetToolIndex(wxRibbonToolBarToolBase* pItem) const;
+    wxRibbonToolBarToolBase* GetToolByIndex(int nIndex) const;
+    wxRibbonToolBarToolBase* GetToolByPosition(const wxPoint& pt) const;
 protected:
     friend class wxRibbonToolBarEvent;
     virtual wxSize DoGetBestSize() const wxOVERRIDE;
@@ -218,6 +223,8 @@ public:
     wxRibbonToolBar* GetBar() {return m_bar;}
     void SetBar(wxRibbonToolBar* bar) {m_bar = bar;}
     bool PopupMenu(wxMenu* menu);
+    wxPoint GetPopupPosition();
+    wxRect GetButtonScreenRect();
 
 protected:
     wxRibbonToolBar* m_bar;

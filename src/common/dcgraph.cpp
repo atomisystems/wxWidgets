@@ -192,9 +192,9 @@ void wxGCDCImpl::Init(wxGraphicsContext* ctx)
     m_mm_to_pix_x = mm2pt;
     m_mm_to_pix_y = mm2pt;
 
-    m_pen = *wxBLACK_PEN;
-    m_font = *wxNORMAL_FONT;
-    m_brush = *wxWHITE_BRUSH;
+	m_pen = wxColour(0, 0, 0);
+	m_font = wxFont(12, wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_NORMAL, false);
+	m_brush = wxColour(255, 255, 255);
 
     m_isClipBoxValid = false;
 

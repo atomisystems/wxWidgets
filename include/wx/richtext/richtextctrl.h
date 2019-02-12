@@ -19,6 +19,7 @@
 #include "wx/caret.h"
 #include "wx/timer.h"
 #include "wx/textctrl.h"
+#include "wx/dcclient.h"
 
 #if wxUSE_DRAG_AND_DROP
 #include "wx/dnd.h"
@@ -2319,7 +2320,8 @@ protected:
 
     virtual void DoThaw() wxOVERRIDE;
 
-
+    virtual wxDC* CreateClientDC(wxWindow* win) { return new wxClientDC(win); }
+    virtual void  DeleteClientDC(wxDC* dc) { delete dc; }
 // Data members
 protected:
 #if wxRICHTEXT_BUFFERED_PAINTING
@@ -2420,6 +2422,8 @@ protected:
     bool                    m_delayedImageProcessingRequired;
     wxLongLong              m_delayedImageProcessingTime;
     wxTimer                 m_delayedImageProcessingTimer;
+
+    void*                   m_pLastTypingCommand;
 };
 
 #if wxUSE_DRAG_AND_DROP
