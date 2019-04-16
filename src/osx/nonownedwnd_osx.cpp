@@ -247,8 +247,9 @@ bool wxNonOwnedWindow::OSXShowWithEffect(bool show,
 
 wxPoint wxNonOwnedWindow::GetClientAreaOrigin() const
 {
-    int left, top, width, height;
-    m_nowpeer->GetContentArea(left, top, width, height);
+	int left = 0, top = 0, width = 0, height = 0;
+	if(m_nowpeer)
+    	m_nowpeer->GetContentArea(left, top, width, height);
     return wxPoint(left, top);
 }
 
@@ -282,13 +283,15 @@ void wxNonOwnedWindow::SetWindowStyleFlag(long flags)
 // Raise the window to the top of the Z order
 void wxNonOwnedWindow::Raise()
 {
-    m_nowpeer->Raise();
+	if (m_nowpeer)
+    	m_nowpeer->Raise();
 }
 
 // Lower the window to the bottom of the Z order
 void wxNonOwnedWindow::Lower()
 {
-    m_nowpeer->Lower();
+	if (m_nowpeer)
+    	m_nowpeer->Lower();
 }
 
 void wxNonOwnedWindow::HandleActivated( double timestampsec, bool didActivate )
@@ -384,13 +387,17 @@ bool wxNonOwnedWindow::Show(bool show)
 
 bool wxNonOwnedWindow::SetTransparent(wxByte alpha)
 {
+	if (!m_nowpeer)
+		return false;
     return m_nowpeer->SetTransparent(alpha);
 }
 
 
 bool wxNonOwnedWindow::CanSetTransparent()
 {
-    return m_nowpeer->CanSetTransparent();
+	if (!m_nowpeer)
+		return false;
+	return m_nowpeer->CanSetTransparent();
 }
 
 
@@ -484,7 +491,8 @@ void wxNonOwnedWindow::Update()
     if ( clock() - s_lastFlush > CLOCKS_PER_SEC / 30 )
     {
         s_lastFlush = clock();
-        m_nowpeer->Update();
+		if(m_nowpeer)
+        	m_nowpeer->Update();
     }
 }
 

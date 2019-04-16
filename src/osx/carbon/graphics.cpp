@@ -34,6 +34,7 @@
 #endif
 
 #ifdef __WXMAC__
+	#include "wx/settings.h"
     #include "wx/osx/private.h"
     #include "wx/osx/dcprint.h"
     #include "wx/osx/dcclient.h"
@@ -54,6 +55,8 @@ extern bool wxOSXLockFocus( WXWidget view) ;
 extern void wxOSXUnlockFocus( WXWidget view) ;
 #endif
 #endif
+
+#define wxOSX_USE_PREMULTIPLIED_ALPHA 1
 
 // copying values from NSCompositingModes (see also webkit and cairo sources)
 
@@ -302,7 +305,7 @@ protected :
     int         m_hatch;
 };
 
-class wxMacCoreGraphicsPenData : public wxGraphicsObjectRefData
+class wxMacCoreGraphicsPenData : public wxGraphicsPenData
 {
 public:
     wxMacCoreGraphicsPenData( wxGraphicsRenderer* renderer, const wxGraphicsPenInfo& info );
@@ -310,7 +313,12 @@ public:
 
     void Init();
     virtual void Apply( wxGraphicsContext* context );
-    virtual wxDouble GetWidth() { return m_width; }
+    virtual wxDouble GetWidth() const { return m_width; }
+    void SetWidth(wxDouble dWidth) { m_width = dWidth; }
+    virtual CGLineCap GetCap() const { return m_cap;}
+    virtual CGLineJoin GetJoin() const {return m_join;}
+    virtual CGFloat GetCount() const {return m_count;}
+    const CGFloat* GetLengths() const {return m_lengths;}
 
 protected :
     CGLineCap m_cap;
@@ -332,7 +340,7 @@ protected :
 
 wxMacCoreGraphicsPenData::wxMacCoreGraphicsPenData( wxGraphicsRenderer* renderer,
                                                     const wxGraphicsPenInfo& info )
-    : wxGraphicsObjectRefData( renderer )
+    : wxGraphicsPenData( renderer )
 {
     Init();
 
@@ -384,9 +392,9 @@ wxMacCoreGraphicsPenData::wxMacCoreGraphicsPenData( wxGraphicsRenderer* renderer
     const CGFloat dashUnit = m_width < 1.0 ? (CGFloat) 1.0 : m_width;
 
     const CGFloat dotted[] = { (CGFloat) dashUnit , (CGFloat) (dashUnit + 2.0) };
-    static const CGFloat short_dashed[] = { (CGFloat) 9.0 , (CGFloat) 6.0 };
-    static const CGFloat dashed[] = { (CGFloat) 19.0 , (CGFloat) 9.0 };
-    static const CGFloat dotted_dashed[] = { (CGFloat) 9.0 , (CGFloat) 6.0 , (CGFloat) 3.0 , (CGFloat) 3.0 };
+    static const CGFloat short_dashed[] = { (CGFloat) (dashUnit * 2), (CGFloat) (dashUnit * 2) };
+    static const CGFloat dashed[] = { (CGFloat) (dashUnit * 3) , (CGFloat) (dashUnit * 3) };
+    static const CGFloat dotted_dashed[] = { (CGFloat) (dashUnit * 2) , (CGFloat) (dashUnit * 2) , (CGFloat) (dashUnit * 0) , (CGFloat) (dashUnit * 2) };
 
     switch ( info.GetStyle() )
     {
@@ -514,20 +522,23 @@ void wxMacCoreGraphicsPenData::Apply( wxGraphicsContext* context )
 
 class wxMacCoreGraphicsColour
 {
-    public:
-        wxMacCoreGraphicsColour();
-        wxMacCoreGraphicsColour(const wxBrush &brush);
-        ~wxMacCoreGraphicsColour();
+public:
+	wxMacCoreGraphicsColour();
+	wxMacCoreGraphicsColour(const wxBrush &brush);
+	wxMacCoreGraphicsColour(wxUint32 nARGB);
+	~wxMacCoreGraphicsColour();
 
-        void Apply( CGContextRef cgContext );
-    protected:
-        void Init();
-        wxCFRef<CGColorRef> m_color;
-        wxCFRef<CGColorSpaceRef> m_colorSpace;
+	void SetGraphicsColourMac(CGImageRef image);
+	void Apply( CGContextRef cgContext );
+	void Transform(CGImageRef image, CGAffineTransform& matrixData );
+protected:
+	void Init();
+	wxCFRef<CGColorRef> m_color;
+	wxCFRef<CGColorSpaceRef> m_colorSpace;
 
-        bool m_isPattern;
-        wxCFRef<CGPatternRef> m_pattern;
-        CGFloat* m_patternColorComponents;
+	bool m_isPattern;
+	wxCFRef<CGPatternRef> m_pattern;
+	CGFloat* m_patternColorComponents;
 } ;
 
 wxMacCoreGraphicsColour::~wxMacCoreGraphicsColour()
@@ -595,11 +606,63 @@ wxMacCoreGraphicsColour::wxMacCoreGraphicsColour( const wxBrush &brush )
     }
 }
 
-class wxMacCoreGraphicsBrushData : public wxGraphicsObjectRefData
+wxMacCoreGraphicsColour::wxMacCoreGraphicsColour(wxUint32 nARGB)
+{ 
+	Init();
+	unsigned char blue  = (unsigned char)(0xFF & nARGB);
+	unsigned char green = (unsigned char)(0xFF & (nARGB >> 8));
+	unsigned char red   = (unsigned char)(0xFF & (nARGB >> 16));
+	unsigned char alpha = (unsigned char)(0xFF & (nARGB >> 24));
+	
+	CGColorRef col = 0 ;
+#if wxOSX_USE_COCOA_OR_CARBON
+	if ( CGColorCreateGenericRGB != NULL )
+		col = CGColorCreateGenericRGB( (CGFloat)(red / 255.0), (CGFloat) (green / 255.0), (CGFloat) (blue / 255.0), (CGFloat) (alpha / 255.0) );
+	else
+#endif
+	{
+		CGFloat components[4] = { (CGFloat)(red / 255.0), (CGFloat) (green / 255.0), (CGFloat) (blue / 255.0), (CGFloat) (alpha / 255.0) } ;
+		col = CGColorCreate( wxMacGetGenericRGBColorSpace() , components ) ;
+	}
+	wxASSERT_MSG(col != NULL, "Invalid CoreGraphics Color");
+	m_color.reset( col );
+}
+
+void wxMacCoreGraphicsColour::SetGraphicsColourMac(CGImageRef image)
+{ 
+	m_isPattern = true;
+	m_patternColorComponents = new CGFloat[1] ;
+	m_patternColorComponents[0] = (CGFloat) 1.0;
+	m_colorSpace.reset( CGColorSpaceCreatePattern( NULL ) );
+	m_pattern.reset( (CGPatternRef) *( new ImagePattern( image , CGAffineTransformMakeScale( 1,-1 ) ) ) );
+}
+
+void wxMacCoreGraphicsColour::Transform(CGImageRef image, CGAffineTransform &matrixData)
+{ 
+	if(m_pattern)
+	{
+		m_isPattern = true;
+		m_patternColorComponents = new CGFloat[1] ;
+		m_patternColorComponents[0] = (CGFloat) 1.0;
+		m_colorSpace.reset( CGColorSpaceCreatePattern( NULL ) );
+		m_pattern.reset( (CGPatternRef) *( new ImagePattern( image , matrixData ) ) );
+	}
+	else{
+	}
+}
+
+
+
+
+class wxMacCoreGraphicsBrushData : public wxGraphicsBrushData
 {
 public:
     wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer );
     wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, const wxBrush &brush );
+	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, wxUint32 nARGB);
+	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, const wxGraphicsBitmap& bitmap);
+	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, int nb_stops, const double* positions, const wxUint32* nARGB, wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2);
+	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, int nb_stops, const double* positions, const wxUint32* nARGB, wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius);
     ~wxMacCoreGraphicsBrushData ();
 
     virtual void Apply( wxGraphicsContext* context );
@@ -612,6 +675,15 @@ public:
 
     virtual bool IsShading() { return m_isShading; }
     CGShadingRef GetShading() { return m_shading; }
+	CGAffineTransform* GetTransform() { return m_transform; }
+	bool IsTransform() { return m_isTransform; }
+	
+	virtual void* GetNativeBrush() const;
+	virtual void Transform(const wxGraphicsMatrixData* matrix);
+	
+	void SetScaleContext(float scalex, float scaley);
+	
+	bool IsImageFill() { return m_cgImage; }
 protected:
     CGFunctionRef CreateGradientFunction(const wxGraphicsGradientStops& stops);
 
@@ -621,8 +693,13 @@ protected:
     wxMacCoreGraphicsColour m_cgColor;
 
     bool m_isShading;
+	bool m_isTransform;
     CGFunctionRef m_gradientFunction;
     CGShadingRef m_shading;
+	CGImageRef m_cgImage;
+	CGAffineTransform* m_transform;
+	float m_fScaleX;
+	float m_fScaleY;
 
     // information about a single gradient component
     struct GradientComponent
@@ -661,7 +738,7 @@ protected:
     GradientComponents m_gradientComponents;
 };
 
-wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer) : wxGraphicsObjectRefData( renderer )
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer) : wxGraphicsBrushData( renderer )
 {
     Init();
 }
@@ -689,7 +766,7 @@ wxMacCoreGraphicsBrushData::CreateRadialGradientBrush(wxDouble xo, wxDouble yo,
     m_isShading = true ;
 }
 
-wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer* renderer, const wxBrush &brush) : wxGraphicsObjectRefData( renderer ),
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer* renderer, const wxBrush &brush) : wxGraphicsBrushData( renderer ),
     m_cgColor( brush )
 {
     Init();
@@ -710,6 +787,10 @@ void wxMacCoreGraphicsBrushData::Init()
     m_gradientFunction = NULL;
     m_shading = NULL;
     m_isShading = false;
+	m_transform = new CGAffineTransform();
+	m_isTransform = false;
+	m_fScaleX = 1;
+	m_fScaleY = 1;
 }
 
 void wxMacCoreGraphicsBrushData::Apply( wxGraphicsContext* context )
@@ -798,6 +879,147 @@ wxMacCoreGraphicsBrushData::CreateGradientFunction(const wxGraphicsGradientStops
                             &callbacks);
 }
 
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, wxUint32 nARGB)
+: wxGraphicsBrushData( renderer ), m_cgColor(nARGB)
+{ 
+	Init();
+}
+
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, const wxGraphicsBitmap& bitmap) : wxGraphicsBrushData( renderer )
+{ 
+	Init();
+	m_cgImage = (CGImageRef)bitmap.GetNativeBitmap();
+	m_cgColor.SetGraphicsColourMac(m_cgImage);
+}
+
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, int nb_stops, const double *positions, const wxUint32 *nARGB, wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2)
+: wxGraphicsBrushData( renderer )
+{ 
+	Init();
+	
+	unsigned char blue      = (unsigned char)(0xFF &  nARGB[0]);
+	unsigned char green     = (unsigned char)(0xFF & (nARGB[0] >> 8));
+	unsigned char red       = (unsigned char)(0xFF & (nARGB[0] >> 16));
+	unsigned char alpha     = (unsigned char)(0xFF & (nARGB[0] >> 24));
+	
+	wxColour c_Begin(red, green, blue, alpha);
+	
+	blue      = (unsigned char)(0xFF &  nARGB[nb_stops-1]);
+	green     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 8));
+	red       = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 16));
+	alpha     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 24));
+	
+	wxColour c_End(red, green, blue, alpha);
+	
+	
+	wxGraphicsGradientStops m_Stop(c_Begin, c_End);
+	
+	for (int i = 0; i < nb_stops; ++i)
+	{
+		blue      = (unsigned char)(0xFF &  nARGB[i]);
+		green     = (unsigned char)(0xFF & (nARGB[i] >> 8));
+		red       = (unsigned char)(0xFF & (nARGB[i] >> 16));
+		alpha     = (unsigned char)(0xFF & (nARGB[i] >> 24));
+		wxColour m_Color(red, green, blue, alpha);
+		m_Stop.Add(m_Color, (float)positions[i]);
+	}
+	
+	m_gradientFunction = CreateGradientFunction(m_Stop);
+	m_shading = CGShadingCreateAxial( wxMacGetGenericRGBColorSpace(), CGPointMake((CGFloat) x1, (CGFloat) y1),
+									 CGPointMake((CGFloat) x2,(CGFloat) y2), m_gradientFunction, true, true ) ;
+	
+	m_isShading = true ;
+}
+
+wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, int nb_stops, const double *positions, const wxUint32 *nARGB, wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius)
+: wxGraphicsBrushData( renderer )
+{ 
+	Init();
+	
+	unsigned char blue      = (unsigned char)(0xFF & nARGB[0]);
+	unsigned char green     = (unsigned char)(0xFF & (nARGB[0] >> 8));
+	unsigned char red       = (unsigned char)(0xFF & (nARGB[0] >> 16));
+	unsigned char alpha     = (unsigned char)(0xFF & (nARGB[0] >> 24));
+	
+	wxColour c_Begin(red, green, blue, alpha);
+	
+	blue      = (unsigned char)(0xFF & nARGB[nb_stops-1]);
+	green     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 8));
+	red       = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 16));
+	alpha     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 24));
+	
+	wxColour c_End(red, green, blue, alpha);
+	
+	wxGraphicsGradientStops m_Stop(c_Begin, c_End);
+	
+	for (int i = 0; i < nb_stops; ++i)
+	{
+		unsigned char blue      = (unsigned char)(0xFF &  nARGB[i]);
+		unsigned char green     = (unsigned char)(0xFF & (nARGB[i] >> 8));
+		unsigned char red       = (unsigned char)(0xFF & (nARGB[i] >> 16));
+		unsigned char alpha     = (unsigned char)(0xFF & (nARGB[i] >> 24));
+		wxColour m_Color(red, green, blue, alpha);
+		m_Stop.Add(m_Color, (float)positions[i]);
+	}
+	
+	m_gradientFunction = CreateGradientFunction(m_Stop);
+	m_shading = CGShadingCreateRadial( wxMacGetGenericRGBColorSpace(), CGPointMake((CGFloat) xo, (CGFloat) yo), (CGFloat) 0, CGPointMake((CGFloat) xc,(CGFloat) yc), (CGFloat) radius, m_gradientFunction, true, true ) ;
+	m_isShading = true ;
+}
+
+void wxMacCoreGraphicsBrushData::Transform(const wxGraphicsMatrixData* matrix)
+{ 
+	CGAffineTransform* transform = (CGAffineTransform*)matrix->GetNativeMatrix();
+	m_transform->a = transform->a;
+	m_transform->b = transform->b;
+	m_transform->c = transform->c;
+	m_transform->d = transform->d;
+	m_transform->tx = transform->tx;
+	m_transform->ty = transform->ty;
+	if(m_gradientFunction == NULL)
+	{
+		m_cgColor.Transform(m_cgImage, *m_transform);
+		m_isTransform = false;
+	}
+	else
+	{
+		m_isTransform = true;
+	}
+}
+
+void wxMacCoreGraphicsBrushData::SetScaleContext(float scalex, float scaley)
+{ 
+	if(m_fScaleX == scalex && m_fScaleY == scaley && m_cgImage)
+		return;
+	m_fScaleX = scalex;
+	m_fScaleY = scaley;
+	CGAffineTransform transform = CGAffineTransformMake(1.0, 0.0, 0.0, 1.0, 0.0, 0.0);
+	transform = CGAffineTransformScale( transform , scalex , scalex);
+	transform = CGAffineTransformTranslate( transform , m_transform->tx , m_transform->ty);
+	transform = CGAffineTransformScale( transform , m_transform->a , m_transform->d);
+	if(m_gradientFunction == NULL)
+	{
+		m_cgColor.Transform(m_cgImage, transform);
+		m_isTransform = false;
+	}
+	else
+	{
+		m_isTransform = true;
+	}
+}
+
+void *wxMacCoreGraphicsBrushData::GetNativeBrush() const
+{ 
+	return nullptr;
+}
+
+
+
+
+
+
+
+
 //
 // Font
 //
@@ -849,33 +1071,1237 @@ wxMacCoreGraphicsFontData::~wxMacCoreGraphicsFontData()
 class wxMacCoreGraphicsBitmapData : public wxGraphicsBitmapData
 {
 public:
-    wxMacCoreGraphicsBitmapData( wxGraphicsRenderer* renderer, CGImageRef bitmap, bool monochrome );
-    ~wxMacCoreGraphicsBitmapData();
-
-    virtual CGImageRef GetBitmap() { return m_bitmap; }
-    virtual void* GetNativeBitmap() const wxOVERRIDE { return m_bitmap; }
-    bool IsMonochrome() { return m_monochrome; }
-
-#if wxUSE_IMAGE
-    wxImage ConvertToImage() const
-    {
-        return wxBitmap(m_bitmap).ConvertToImage();
-    }
-#endif // wxUSE_IMAGE
-
-private :
-    CGImageRef m_bitmap;
-    bool m_monochrome;
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, CGImageRef bitmap, double dScaleFactor = 1.0);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxBitmap &bmp );
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, int w, int h, double dScaleFactor = 1.0);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxImage &img, double dScaleFactor = 1.0);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const unsigned char* pBGRA, int w, int h, double dScaleFactor = 1.0);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxColour& colour, int w, int h, double dScaleFactor = 1.0);
+	wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxMacCoreGraphicsBitmapData &tocopy);
+	
+	virtual ~wxMacCoreGraphicsBitmapData ();
+	
+	virtual bool IsOk() const;
+	
+	void Free();
+	
+	int GetWidth() const;
+	int GetHeight() const;
+	int GetDepth() const;
+	int GetBytesPerRow() const;
+	int GetScaledWidth() const;
+	int GetScaledHeight() const;
+	double GetScaleFactor() const { return m_scaleFactor; }
+	
+	const void *GetRawAccess() const;
+	void *GetRawAccess();
+	void *BeginRawAccess();
+	void EndRawAccess();
+	
+	void UseAlpha( bool useAlpha );
+	
+	bool IsTemplate() const { return m_isTemplate; }
+	void SetTemplate(bool is) { m_isTemplate = is; }
+	
+	bool HasAlpha() const;
+	wxColour GetPixel(int x, int y);
+	wxImage ConvertToImage( bool bRemoveAlpha = false) const;
+	
+	bool FillBGRA(unsigned char* pDataDest, int nLineSize);
+	bool FillARGB(unsigned char* pDataDest, int nLineSize);
+	bool FillBGR24(unsigned char* pDataDest, int nLineSize, bool bNoAlphaHint = false);
+	
+	bool SetBGRA(const unsigned char* pBGRA, int nLineSize);
+	bool SetARGB(const unsigned char* pBGRA, int nLineSize);
+	void MakeTransparent();
+	void ChangeData(void (*fptr)(void* rowData, int w, void* optionData), void* optionData);
+	
+	wxMacCoreGraphicsBitmapData* CreateShadowData( int nBlurRadius, unsigned char r, unsigned char g, unsigned char b, unsigned a );
+	wxMacCoreGraphicsBitmapData* CreateBlurredData( int nBlurRadiusH, int nBlurRadiusV);
+	
+	virtual void* GetNativeBitmap() const {return CreateCGImage();}
+	virtual WXImage GetImage() const;
+	
+	
+public:
+#if wxUSE_PALETTE
+	wxPalette     m_bitmapPalette;
+#endif // wxUSE_PALETTE
+	
+	CGImageRef    CreateCGImage() const;
+	
+	// returns true if the bitmap has a size that
+	// can be natively transferred into a true icon
+	// if no is returned GetIconRef will still produce
+	// an icon but it will be generated via a PICT and
+	// rescaled to 16 x 16
+	bool          HasNativeSize();
+	
+#if wxOSX_USE_ICONREF
+	// caller should increase ref count if needed longer
+	// than the bitmap exists
+	IconRef       GetIconRef();
+#endif
+	
+	CGContextRef  GetBitmapContext() const;
+	
+	void SetSelectedInto(wxDC *dc);
+	wxDC *GetSelectedInto() const;
+	
+private:
+	bool Create( CGImageRef image, double scale );
+	bool Create( int w , int h , int d, double logicalScale );
+	bool Create( CGContextRef context);
+	bool Create( WXImage image);
+	void Init();
+	
+	void EnsureBitmapExists() const;
+	
+	void FreeDerivedRepresentations();
+	
+	WXImage    m_nsImage;
+	int           m_rawAccessCount;
+	mutable CGImageRef    m_cgImageRef;
+	bool          m_isTemplate;
+	
+#ifndef __WXOSX_IPHONE__
+	IconRef       m_iconRef;
+#endif
+	
+	wxCFRef<CGContextRef>  m_hBitmap;
+	double		m_scaleFactor;
+	wxDC*         m_selectedInto;
 };
 
-wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData( wxGraphicsRenderer* renderer, CGImageRef bitmap, bool monochrome ) : wxGraphicsBitmapData( renderer ),
-    m_bitmap(bitmap), m_monochrome(monochrome)
+static const int kBestByteAlignement = 16;
+static const int kMaskBytesPerPixel = 1;
+
+static int GetBestBytesPerRow( int rawBytes )
 {
+	return (((rawBytes)+kBestByteAlignement-1) & ~(kBestByteAlignement-1) );
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer) : wxGraphicsBitmapData(renderer)
+{
+	Init() ;
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxBitmap &bmp) : wxGraphicsBitmapData(renderer)
+{
+	Init();
+	if (bmp.IsOk())
+	{
+		CGImageRef bitmap = bmp.CreateCGImage();
+		Create(bitmap, bmp.GetScaleFactor());
+		CGImageRelease(bitmap);
+	}
+	Init();
+	Create(bmp.GetWidth(), bmp.GetHeight(), bmp.GetDepth(), bmp.GetScaleFactor());
+	
+	if (bmp.HasAlpha())
+		UseAlpha(true);
+	
+	unsigned char* dest = (unsigned char*)GetRawAccess();
+	unsigned char* source = (unsigned char*)bmp.GetRefData();
+	size_t numbytes = GetBytesPerRow() * GetHeight();
+	memcpy( dest, source, numbytes );
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, int w, int h, double dScaleFactor) : wxGraphicsBitmapData(renderer)
+{
+	Init() ;
+	Create(w , h, 32, dScaleFactor) ;
+}
+
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, CGImageRef bitmap, double dScaleFactor) : wxGraphicsBitmapData(renderer)
+{
+	Init();
+	Create(bitmap, dScaleFactor);
+}
+
+bool wxMacCoreGraphicsBitmapData::Create(int w , int h , int d, double dScaleFactor)
+{
+	size_t m_width = wxMax(1, w);
+	size_t m_height = wxMax(1, h);
+	
+	m_scaleFactor = dScaleFactor;
+	m_hBitmap = NULL;
+	
+	size_t m_bytesPerRow = GetBestBytesPerRow(m_width * 4);
+	void* data = NULL;
+	m_hBitmap = CGBitmapContextCreate((char*)data, m_width, m_height, 8, m_bytesPerRow, wxMacGetGenericRGBColorSpace(), kCGImageAlphaPremultipliedFirst);
+	wxASSERT_MSG(m_hBitmap, wxT("Unable to create CGBitmapContext context"));
+	CGContextTranslateCTM(m_hBitmap, 0, m_height);
+	CGContextScaleCTM(m_hBitmap, 1 * GetScaleFactor(), -1 * GetScaleFactor());
+	
+	return IsOk();
+}
+
+bool wxMacCoreGraphicsBitmapData::Create( CGContextRef context)
+{
+	if ( context != NULL && CGBitmapContextGetData(context) )
+	{
+		m_hBitmap = context;
+		// our own contexts conform to this, always.
+		wxASSERT( GetDepth() == 32 );
+		
+		// determine content scale
+		CGRect userrect = CGRectMake(0, 0, 10, 10);
+		CGRect devicerect;
+		devicerect = CGContextConvertRectToDeviceSpace(context, userrect);
+		m_scaleFactor = devicerect.size.height / userrect.size.height;
+	}
+	return IsOk() ;
+}
+
+bool wxMacCoreGraphicsBitmapData::Create( WXImage image)
+{
+	m_nsImage = image;
+	
+	wxMacCocoaRetain(image);
+	
+	m_scaleFactor = wxOSXGetImageScaleFactor(image);
+	
+	return true;
+}
+
+void wxMacCoreGraphicsBitmapData::EnsureBitmapExists() const
+{
+	if ( ! m_hBitmap && m_nsImage)
+	{
+		wxMacCoreGraphicsBitmapData* t =  const_cast<wxMacCoreGraphicsBitmapData*>(this);
+		t->m_hBitmap = wxOSXCreateBitmapContextFromImage(m_nsImage, &t->m_isTemplate);
+	}
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxImage &img, double dScaleFactor) : wxGraphicsBitmapData(renderer)
+{
+	wxCHECK_RET( img.IsOk(), wxT("invalid image") );
+	
+	// width and height of the device-dependent bitmap
+	int width = img.GetWidth();
+	int height = img.GetHeight();
+	
+	Init() ;
+	Create(width , height, 32, dScaleFactor) ;
+	
+	if ( IsOk())
+	{
+		// Create picture
+		
+		bool hasAlpha = false ;
+		
+		if ( img.HasMask() )
+		{
+			// takes precedence, don't mix with alpha info
+		}
+		else
+		{
+			hasAlpha = img.HasAlpha() ;
+		}
+		
+		if ( hasAlpha )
+			UseAlpha(true) ;
+		
+		unsigned char* destinationstart = (unsigned char*) BeginRawAccess() ;
+		unsigned char* data = img.GetData();
+		if ( destinationstart != NULL && data != NULL )
+		{
+			const unsigned char *alpha = hasAlpha ? img.GetAlpha() : NULL ;
+			for (int y = 0; y < height; destinationstart += GetBytesPerRow(), y++)
+			{
+				unsigned char * destination = destinationstart;
+				for (int x = 0; x < width; x++)
+				{
+					if ( hasAlpha )
+					{
+						const unsigned char a = *alpha++;
+						*destination++ = a ;
+						
+#if wxOSX_USE_PREMULTIPLIED_ALPHA
+						*destination++ = ((*data++) * a + 127) / 255 ;
+						*destination++ = ((*data++) * a + 127) / 255 ;
+						*destination++ = ((*data++) * a + 127) / 255 ;
+#else
+						*destination++ = *data++ ;
+						*destination++ = *data++ ;
+						*destination++ = *data++ ;
+#endif
+					}
+					else
+					{
+						*destination++ = 0xFF ;
+						*destination++ = *data++ ;
+						*destination++ = *data++ ;
+						*destination++ = *data++ ;
+					}
+				}
+			}
+			
+			EndRawAccess() ;
+		}
+	}
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const unsigned char* bgraSrc, int w, int h, double dScaleFactor) : wxGraphicsBitmapData(renderer)
+{
+	Init();
+	Create(w, h, 32, dScaleFactor);
+	if(IsOk())
+	{
+		int linesize = w / 8;
+		if ( w % 8 )
+			linesize++;
+		
+		unsigned char* destptr = (unsigned char*) BeginRawAccess() ;
+		w = w << 2;
+		unsigned char* rowData;
+		for (int row = 0; row < h; ++row)
+		{
+			rowData =(unsigned char *)destptr + (row * GetBytesPerRow());
+			memcpy(rowData, bgraSrc, w);
+			bgraSrc += w;
+		}
+		
+		EndRawAccess() ;
+	}
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxColour& colour, int w, int h, double dScaleFactor) : wxGraphicsBitmapData(renderer)
+{
+	
+	Init();
+	Create(w, h, 32, dScaleFactor);
+	CGContextSetRGBFillColor(m_hBitmap, colour.Red(), colour.Green(), colour.Blue(), colour.Alpha());
+}
+
+wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, const wxMacCoreGraphicsBitmapData &tocopy) : wxGraphicsBitmapData(renderer)
+{
+	Init();
+	Create(tocopy.GetWidth(), tocopy.GetHeight(), tocopy.GetDepth(), tocopy.GetScaleFactor());
+	
+	if (tocopy.HasAlpha())
+		UseAlpha(true);
+	
+	unsigned char* dest = (unsigned char*)GetRawAccess();
+	unsigned char* source = (unsigned char*)tocopy.GetRawAccess();
+	size_t numbytes = GetBytesPerRow() * GetHeight();
+	memcpy( dest, source, numbytes );
+}
+
+bool wxMacCoreGraphicsBitmapData::IsOk() const
+{
+	return (m_hBitmap.get() != NULL || m_nsImage != NULL);
+}
+
+int wxMacCoreGraphicsBitmapData::GetWidth() const
+{
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( m_hBitmap )
+		return (int) CGBitmapContextGetWidth(m_hBitmap);
+	else
+		return (int) wxOSXGetImageSize(m_nsImage).width * m_scaleFactor;
+}
+
+int wxMacCoreGraphicsBitmapData::GetHeight() const
+{
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( m_hBitmap )
+		return (int) CGBitmapContextGetHeight(m_hBitmap);
+	else
+		return (int) wxOSXGetImageSize(m_nsImage).height * m_scaleFactor;
+}
+
+int wxMacCoreGraphicsBitmapData::GetDepth() const
+{
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( m_hBitmap )
+		return (int) CGBitmapContextGetBitsPerPixel(m_hBitmap);
+	else
+		return 32; // a bitmap converted from an nsimage would have this depth
+}
+int wxMacCoreGraphicsBitmapData::GetBytesPerRow() const
+{
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( m_hBitmap )
+		return (int) CGBitmapContextGetBytesPerRow(m_hBitmap);
+	else
+		return (int) GetBestBytesPerRow( GetWidth() * 4);
+}
+
+bool wxMacCoreGraphicsBitmapData::HasAlpha() const
+{
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( m_hBitmap )
+	{
+		CGImageAlphaInfo alpha = CGBitmapContextGetAlphaInfo(m_hBitmap);
+		return !(alpha == kCGImageAlphaNone || alpha == kCGImageAlphaNoneSkipFirst || alpha == kCGImageAlphaNoneSkipLast);
+	}
+	else
+	{
+		return true; // a bitmap converted from an nsimage would have alpha
+	}
+}
+
+int wxMacCoreGraphicsBitmapData::GetScaledWidth() const
+{
+	return wxRound(GetWidth() * m_scaleFactor);
+}
+
+
+int wxMacCoreGraphicsBitmapData::GetScaledHeight() const
+{
+	return wxRound(GetHeight() * m_scaleFactor);
+}
+
+const void *wxMacCoreGraphicsBitmapData::GetRawAccess() const
+{
+	wxCHECK_MSG( IsOk(), NULL , wxT("invalid bitmap") ) ;
+	
+	EnsureBitmapExists();
+	
+	return CGBitmapContextGetData(m_hBitmap);
+}
+
+void *wxMacCoreGraphicsBitmapData::GetRawAccess()
+{
+	return const_cast<void*>(const_cast<const wxMacCoreGraphicsBitmapData*>(this)->GetRawAccess());
+}
+
+
+void *wxMacCoreGraphicsBitmapData::BeginRawAccess()
+{
+	wxCHECK_MSG( IsOk(), NULL, wxT("invalid bitmap") ) ;
+	wxASSERT( m_rawAccessCount == 0 ) ;
+	
+#if wxOSX_USE_ICONREF
+	wxASSERT_MSG( m_iconRef == NULL ,
+				 wxT("Currently, modifing bitmaps that are used in controls already is not supported") ) ;
+#endif
+	
+	++m_rawAccessCount ;
+	
+	// we must destroy an existing cached image, as
+	// the bitmap data may change now
+	FreeDerivedRepresentations();
+	
+	return GetRawAccess() ;
+}
+
+void wxMacCoreGraphicsBitmapData::EndRawAccess()
+{
+	wxCHECK_RET( IsOk() , wxT("invalid bitmap") ) ;
+	wxASSERT( m_rawAccessCount == 1 ) ;
+	
+	--m_rawAccessCount ;
+}
+
+void wxMacCoreGraphicsBitmapData::UseAlpha( bool use )
+{
+	wxCHECK_RET( IsOk() , wxT("invalid bitmap") ) ;
+	
+	if ( HasAlpha() == use )
+		return ;
+	
+	CGContextRef hBitmap = CGBitmapContextCreate(NULL, GetWidth(), GetHeight(), 8, GetBytesPerRow(), wxMacGetGenericRGBColorSpace(), use ? kCGImageAlphaPremultipliedFirst : kCGImageAlphaNoneSkipFirst );
+	
+	memcpy(CGBitmapContextGetData(hBitmap),CGBitmapContextGetData(m_hBitmap),GetBytesPerRow()*GetHeight());
+	
+	wxASSERT_MSG( hBitmap , wxT("Unable to create CGBitmapContext context") ) ;
+	CGContextTranslateCTM( hBitmap, 0,  GetHeight() );
+	CGContextScaleCTM( hBitmap, GetScaleFactor(), -GetScaleFactor() );
+	
+	m_hBitmap.reset(hBitmap);
+}
+
+CGImageRef wxMacCoreGraphicsBitmapData::CreateCGImage() const
+{
+	wxASSERT( IsOk() ) ;
+	wxASSERT( m_rawAccessCount >= 0 ) ;
+	CGImageRef image ;
+	if ( m_rawAccessCount > 0 || m_cgImageRef == NULL )
+	{
+		if (m_nsImage)
+		{
+			image = wxOSXCreateCGImageFromImage(m_nsImage);
+		}
+		else
+		{
+			if (GetDepth() != 1)
+			{
+				image = CGBitmapContextCreateImage(m_hBitmap);
+			}
+			else
+			{
+				size_t imageSize = GetHeight() * GetBytesPerRow();
+				
+				int w = GetWidth();
+				int h = GetHeight();
+				CGImageAlphaInfo alphaInfo = kCGImageAlphaNoneSkipFirst;
+				wxMemoryBuffer membuf;
+				
+				if (HasAlpha())
+				{
+#if wxOSX_USE_PREMULTIPLIED_ALPHA
+					alphaInfo = kCGImageAlphaPremultipliedFirst;
+#else
+					alphaInfo = kCGImageAlphaFirst;
+#endif
+				}
+				memcpy(membuf.GetWriteBuf(imageSize), GetRawAccess(), imageSize);
+				membuf.UngetWriteBuf(imageSize);
+				
+				CGDataProviderRef dataProvider = NULL;
+				if (GetDepth() == 1)
+				{
+					// TODO CHECK ALIGNMENT
+					wxMemoryBuffer maskBuf;
+					unsigned char* maskBufData = (unsigned char*)maskBuf.GetWriteBuf(GetWidth() * GetHeight());
+					unsigned char* bufData = (unsigned char*)membuf.GetData();
+					// copy one color component
+					size_t i = 0;
+					for (int y = 0; y < GetHeight(); bufData += GetBytesPerRow(), ++y)
+					{
+						unsigned char* bufDataIter = bufData + 3;
+						for (int x = 0; x < GetWidth(); bufDataIter += 4, ++x, ++i)
+						{
+							maskBufData[i] = *bufDataIter;
+						}
+					}
+					maskBuf.UngetWriteBuf(GetWidth() * GetHeight());
+					
+					dataProvider = wxMacCGDataProviderCreateWithMemoryBuffer(maskBuf);
+					
+					image = ::CGImageMaskCreate(w, h, 8, 8, GetWidth(), dataProvider, NULL, false);
+				}
+				else
+				{
+					CGColorSpaceRef colorSpace = wxMacGetGenericRGBColorSpace();
+					dataProvider = wxMacCGDataProviderCreateWithMemoryBuffer(membuf);
+					image = ::CGImageCreate(
+											w, h, 8, 32, GetBytesPerRow(), colorSpace, alphaInfo,
+											dataProvider, NULL, false, kCGRenderingIntentDefault);
+				}
+				CGDataProviderRelease(dataProvider);
+			}
+		}
+	}
+	else
+	{
+		image = m_cgImageRef ;
+		CGImageRetain( image ) ;
+	}
+	
+	if ( m_rawAccessCount == 0 && m_cgImageRef == NULL)
+	{
+		// we keep it for later use
+		m_cgImageRef = image ;
+		CGImageRetain( image ) ;
+	}
+	
+	return image ;
+}
+
+bool wxMacCoreGraphicsBitmapData::HasNativeSize()
+{
+	int w = GetWidth() ;
+	int h = GetHeight() ;
+	int sz = wxMax( w , h ) ;
+	
+	return ( sz == 128 || sz == 48 || sz == 32 || sz == 16 );
+}
+
+CGContextRef wxMacCoreGraphicsBitmapData::GetBitmapContext() const
+{
+	return m_hBitmap;
+}
+
+void wxMacCoreGraphicsBitmapData::SetSelectedInto(wxDC *dc)
+{
+	if ( dc == NULL )
+	{
+		if ( m_selectedInto != NULL )
+			EndRawAccess();
+	}
+	else
+	{
+		wxASSERT_MSG( m_selectedInto == NULL || m_selectedInto == dc, "Bitmap already selected into a different dc");
+		
+		if ( m_selectedInto == NULL )
+			(void) BeginRawAccess();
+	}
+	
+	m_selectedInto = dc;
+}
+
+wxDC *wxMacCoreGraphicsBitmapData::GetSelectedInto() const
+{
+	return m_selectedInto;
+}
+
+void wxMacCoreGraphicsBitmapData::FreeDerivedRepresentations()
+{
+	if ( m_cgImageRef )
+	{
+		CGImageRelease( m_cgImageRef ) ;
+		m_cgImageRef = NULL ;
+	}
+#if wxOSX_USE_ICONREF
+	if ( m_iconRef )
+	{
+		ReleaseIconRef( m_iconRef ) ;
+		m_iconRef = NULL ;
+	}
+#endif // wxOSX_USE_ICONREF
+}
+
+void wxMacCoreGraphicsBitmapData::Free()
+{
+	wxASSERT_MSG( m_rawAccessCount == 0 , wxT("Bitmap still selected when destroyed") ) ;
+	
+	FreeDerivedRepresentations();
+	
+	wxMacCocoaRelease(m_nsImage);
+	
+	m_hBitmap.reset();
+}
+
+bool wxMacCoreGraphicsBitmapData::Create(CGImageRef image, double scale)
+{
+	if ( image != NULL )
+	{
+		size_t m_width = (int)CGImageGetWidth(image);
+		size_t m_height = (int)CGImageGetHeight(image);
+		m_hBitmap = NULL;
+		m_scaleFactor = scale;
+		
+		size_t m_bytesPerRow = GetBestBytesPerRow( m_width * 4 ) ;
+		void* data = NULL;
+		
+		CGImageAlphaInfo alpha = CGImageGetAlphaInfo(image);
+		if (alpha == kCGImageAlphaNone || alpha == kCGImageAlphaNoneSkipFirst || alpha == kCGImageAlphaNoneSkipLast)
+		{
+			m_hBitmap = CGBitmapContextCreate((char*)data, m_width, m_height, 8, m_bytesPerRow, wxMacGetGenericRGBColorSpace(), kCGImageAlphaNoneSkipFirst);
+		}
+		else
+		{
+			m_hBitmap = CGBitmapContextCreate((char*)data, m_width, m_height, 8, m_bytesPerRow, wxMacGetGenericRGBColorSpace(), kCGImageAlphaPremultipliedFirst);
+		}
+		CGRect rect = CGRectMake(0, 0, m_width, m_height);
+		CGContextDrawImage(m_hBitmap, rect, image);
+		
+		wxASSERT_MSG(m_hBitmap, wxT("Unable to create CGBitmapContext context"));
+		CGContextTranslateCTM(m_hBitmap, 0, m_height);
+		CGContextScaleCTM(m_hBitmap, 1 * m_scaleFactor, -1 * m_scaleFactor);
+	}
+	
+	return IsOk() ;
+	
+}
+
+void wxMacCoreGraphicsBitmapData::Init()
+{
+	m_nsImage = NULL;
+	m_cgImageRef = NULL ;
+	m_isTemplate = false;
+	
+	m_hBitmap = NULL ;
+	
+	m_rawAccessCount = 0 ;
+	m_scaleFactor = 1.0;
+	m_selectedInto = NULL;
 }
 
 wxMacCoreGraphicsBitmapData::~wxMacCoreGraphicsBitmapData()
 {
-    CGImageRelease( m_bitmap );
+	Free();
+}
+
+wxImage wxMacCoreGraphicsBitmapData::ConvertToImage(bool bRemoveAlpha /*= false*/) const
+{
+	wxImage image;
+	
+	wxCHECK_MSG( IsOk(), wxNullImage, wxT("invalid bitmap") );
+	
+	// this call may trigger a conversion from platform image to bitmap, issue it
+	// before any measurements are taken, multi-resolution platform images may be
+	// rendered incorrectly otherwise
+	unsigned char* sourcestart = (unsigned char* )GetRawAccess() ;
+	
+	// create an wxImage object
+	int width = GetWidth();
+	int height = GetHeight();
+	image.Create( width, height );
+	
+	unsigned char *data = image.GetData();
+	wxCHECK_MSG( data, wxNullImage, wxT("Could not allocate data for image") );
+	
+	bool hasAlpha = false ;
+	unsigned char *alpha = NULL ;
+	
+	if ( HasAlpha() )
+		hasAlpha = true ;
+	
+	if ( hasAlpha )
+	{
+		image.SetAlpha() ;
+		alpha = image.GetAlpha() ;
+	}
+	
+	int index = 0;
+	
+	
+	for (int yy = 0; yy < height; yy++ , sourcestart += GetBytesPerRow())
+	{
+		const wxUint32 * source = (wxUint32*)sourcestart;
+		unsigned char a, r, g, b;
+		
+		for (int xx = 0; xx < width; xx++)
+		{
+			const wxUint32 color = *source++;
+#ifdef WORDS_BIGENDIAN
+			a = ((color&0xFF000000) >> 24) ;
+			r = ((color&0x00FF0000) >> 16) ;
+			g = ((color&0x0000FF00) >> 8) ;
+			b = (color&0x000000FF);
+#else
+			b = ((color&0xFF000000) >> 24) ;
+			g = ((color&0x00FF0000) >> 16) ;
+			r = ((color&0x0000FF00) >> 8) ;
+			a = (color&0x000000FF);
+#endif
+			if ( hasAlpha )
+			{
+				*alpha++ = a ;
+#if wxOSX_USE_PREMULTIPLIED_ALPHA
+				// this must be non-premultiplied data
+				if ( a != 0xFF && a!= 0 )
+				{
+					r = r * 255 / a;
+					g = g * 255 / a;
+					b = b * 255 / a;
+				}
+#endif
+			}
+			
+			data[index    ] = r ;
+			data[index + 1] = g ;
+			data[index + 2] = b ;
+			
+			index += 3;
+		}
+	}
+	
+	return image;
+}
+
+wxColour wxMacCoreGraphicsBitmapData::GetPixel( int x, int y )
+{
+	uint8_t* nBuffer = (uint8_t*)BeginRawAccess();
+	int pixelInfo = ((GetWidth()  * y) + x ) * 4;
+	wxColour color(nBuffer[pixelInfo+1], nBuffer[pixelInfo+2], nBuffer[pixelInfo+3], nBuffer[pixelInfo]);
+	EndRawAccess();
+	return color;
+}
+
+bool wxMacCoreGraphicsBitmapData::FillBGRA( unsigned char* pDataDest, int nLineSize )
+{
+	unsigned char* rowData;
+	unsigned char* bgrDest;
+	uint8_t *nBuffer = (uint8_t *)GetRawAccess();
+	if (!nBuffer)
+		return false;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData = (unsigned char *)(nBuffer + y * m_bytesPerRow);
+		bgrDest = (unsigned char *)(pDataDest + y * nLineSize);
+		for (int x = 0; x < GetWidth(); x++)
+		{
+			bgrDest[0] = rowData[3];
+			bgrDest[1] = rowData[2];
+			bgrDest[2] = rowData[1];
+			bgrDest[3] = rowData[0];
+			rowData += 4;
+			bgrDest += 4;
+		}
+	}
+	return true;
+}
+
+bool wxMacCoreGraphicsBitmapData::FillARGB( unsigned char* pDataDest, int nLineSize )
+{
+	unsigned char* rowData;
+	unsigned char* bgrDest;
+	uint8_t *nBuffer = (uint8_t *)GetRawAccess();
+	if (!nBuffer)
+		return false;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	size_t m_width = GetWidth();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData = (unsigned char *)(nBuffer + y * m_bytesPerRow);
+		bgrDest = (unsigned char *)(pDataDest + y * nLineSize);
+		memcpy(bgrDest, rowData, m_width * 4);
+	}
+	return true;
+}
+
+
+bool wxMacCoreGraphicsBitmapData::FillBGR24(unsigned char* pDataDest, int nLineSize, bool bNoAlphaHint /*= false*/)
+{
+	unsigned char* rowData;
+	unsigned char* bgr24Dest;
+	uint8_t *nBuffer = (uint8_t *)GetRawAccess();
+	if (!nBuffer)
+		return false;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	if (HasAlpha() && !bNoAlphaHint)
+	{
+		for (int y = 0; y < GetHeight(); y++)
+		{
+			rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+			bgr24Dest = (unsigned char *)(pDataDest + y * nLineSize);
+			for (int x = 0; x < GetWidth(); x++)
+			{
+				if (rowData[0]>0)
+				{
+					bgr24Dest[0] = wxClip(rowData[3] * 255/rowData[0], 0, 255);
+					bgr24Dest[1] = wxClip(rowData[2] * 255/rowData[0], 0, 255);
+					bgr24Dest[2] = wxClip(rowData[1] * 255/rowData[0], 0, 255);
+				}
+				rowData += 4;
+				bgr24Dest += 3;
+			}
+		}
+	}
+	else
+	{
+		for (int y = 0; y < GetHeight(); y++)
+		{
+			rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+			bgr24Dest = (unsigned char *)(pDataDest + y * nLineSize);
+			for (int x = 0; x < GetWidth(); x++)
+			{
+				bgr24Dest[0] = rowData[3];
+				bgr24Dest[1] = rowData[2];
+				bgr24Dest[2] = rowData[1];
+				rowData += 4;
+				bgr24Dest += 3;
+			}
+		}
+	}
+	return true;
+}
+
+bool wxMacCoreGraphicsBitmapData::SetBGRA( const unsigned char* pBGRA, int nLineSize )
+{
+	uint8_t* nBuffer = (uint8_t*)BeginRawAccess();
+	if(nBuffer == NULL)
+	{
+		return false;
+	}
+	uint8_t* rowData ;
+	unsigned char* bgraSrc;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+		bgraSrc = (unsigned char*)(pBGRA) + (y * nLineSize);
+		for (int x = 0; x < GetWidth(); x++)
+		{
+			rowData[0] = bgraSrc[3];
+			rowData[1] = bgraSrc[2];
+			rowData[2] = bgraSrc[1];
+			rowData[3] = bgraSrc[0];
+			rowData += 4;
+			bgraSrc += 4;
+		}
+	}
+	EndRawAccess();
+	return true;
+}
+
+bool wxMacCoreGraphicsBitmapData::SetARGB( const unsigned char* pBGRA, int nLineSize )
+{
+	uint8_t* nBuffer = (uint8_t*)BeginRawAccess();
+	if(nBuffer == NULL)
+	{
+		return false;
+	}
+	uint8_t* rowData ;
+	unsigned char* bgraSrc;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	size_t m_width = GetWidth();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+		bgraSrc = (unsigned char*)(pBGRA) + (y * nLineSize);
+		memcpy(rowData, bgraSrc, m_width * 4);
+	}
+	EndRawAccess();
+	return true;
+}
+
+void wxMacCoreGraphicsBitmapData::MakeTransparent()
+{
+	uint8_t* nBuffer = (uint8_t*)BeginRawAccess();
+	if(nBuffer == NULL)
+	{
+		return;
+	}
+	uint8_t* rowData ;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+		memcpy(rowData, 0, m_bytesPerRow);
+	}
+	SetBGRA(nBuffer, m_bytesPerRow);
+	EndRawAccess();
+}
+
+void wxMacCoreGraphicsBitmapData::ChangeData(void (*fptr)(void* rowData, int w, void* optionData), void* optionData)
+{
+	uint8_t* nBuffer = (uint8_t*)BeginRawAccess();
+	if(nBuffer == NULL)
+	{
+		return;
+	}
+	uint8_t* rowData ;
+	size_t m_bytesPerRow = GetBytesPerRow();
+	size_t m_width = GetWidth();
+	for (int y = 0; y < GetHeight(); y++)
+	{
+		rowData =(unsigned char *)(nBuffer + y * m_bytesPerRow);
+		fptr(rowData, m_width, optionData);
+	}
+	
+	EndRawAccess();
+}
+
+#define PIXEL_SIZE 4
+#define SIGMA 1
+
+void applyShadowColor(unsigned char * bmpData, int nSrcW, int nSrcH, int Stride, unsigned char r, unsigned char g, unsigned char b, unsigned char a)
+{
+	unsigned int nR = r;
+	unsigned int nG = g;
+	unsigned int nB = b;
+	unsigned int nA = a;
+	for (int i = 0; i < nSrcH; ++i)
+	{
+		unsigned char * rowData = (unsigned char *)bmpData + (i * Stride);
+		for (int j = 0; j < nSrcW; ++j)
+		{
+			int nColIndex = j * PIXEL_SIZE;
+			//Apply alpha for this point
+			rowData[nColIndex + 0]	= nA * rowData[nColIndex + 0]/255;
+			//Make pre-multiplied values
+			rowData[nColIndex + 3]	= nB * rowData[nColIndex + 0]/255;
+			rowData[nColIndex + 2]	= nG * rowData[nColIndex + 0]/255;
+			rowData[nColIndex + 1]	= nR * rowData[nColIndex + 0]/255;
+		}
+	}
+}
+
+void applyAlphaGaussianBlurHorizontally(const unsigned char * bmpDataSrc, int nSrcW, int nSrcH, int srcStride, int nHozBlurR, unsigned char * bmpDataDes, int nDesW, int nDesH, int desStride)
+{
+	
+	// Allocate space for convolution matrix
+	int matrixW = 2 * nHozBlurR + 1;
+	double *matrixHoz = new double[matrixW];
+	
+	// Fill in the convolution matrix
+	double matrixSumHoz = 0;
+	double dSigma = nHozBlurR/3.0;
+	for (int j = 0; j < matrixW; ++j)
+	{
+		double x = j - nHozBlurR;
+		matrixHoz[j] = (exp(-((x * x) / (2.0 * dSigma * dSigma)))) / (2.0 * M_PI * dSigma * dSigma);
+		matrixSumHoz += matrixHoz[j];
+	}
+	
+	const int nAlphaIndex = 0;
+	//Blur horizontally
+	for (int i = 0; i < nDesH; ++i)
+	{
+		unsigned char * rowDataDes =(unsigned char *)bmpDataDes+ (i * desStride);
+		for (int j = 0; j < nDesW; ++j)
+		{
+			int nColIndex = j * PIXEL_SIZE;
+			// Compute filtered value
+			double dFilteredValue = 0;
+			for (int n = 0; n < matrixW; ++n)
+			{
+				int x = (j - nHozBlurR + n) - nHozBlurR; // - nHozBlurR ->Map to source image
+				if (x < 0 || x >= nSrcW)
+					continue;
+				dFilteredValue += ((unsigned char *)bmpDataSrc)[(i * srcStride) + (x * PIXEL_SIZE) + nAlphaIndex] * matrixHoz[n];
+			}
+			// Store result
+			rowDataDes[nColIndex + nAlphaIndex] = (dFilteredValue / matrixSumHoz);
+		}
+	}
+	// Deallocate convolution matrix
+	delete[] matrixHoz;
+}
+
+void applyAlphaGaussianBlurVertically(const unsigned char * bmpDataSrc, int nSrcW, int nSrcH, int srcStride, int nVerBlurR, unsigned char * bmpDataDes, int nDesW, int nDesH, int desStride)
+{
+	
+	// Allocate space for convolution matrix
+	int matrixH = 2 * nVerBlurR + 1;
+	double *matrixVer = new double[matrixH];
+	
+	double matrixSumVer = 0;
+	double dSigma = nVerBlurR/3.0;
+	for (int i = 0; i < matrixH; ++i)
+	{
+		double x = i - nVerBlurR;
+		matrixVer[i] = (exp(-((x * x) / (2.0 * dSigma * dSigma)))) / (2.0 * M_PI * dSigma * dSigma);
+		matrixSumVer += matrixVer[i];
+	}
+	
+	const int nAlphaIndex = 0;
+	//Blur vertically
+	for (int i = 0; i < nDesH; ++i)
+	{
+		unsigned char * rowDataDes =(unsigned char *)bmpDataDes + (i * desStride);
+		for (int j = 0; j < nDesW; ++j)
+		{
+			int nColIndex = j * PIXEL_SIZE;
+			// Compute filtered value
+			double dFilteredValue = 0;
+			for (int m = 0; m < matrixH; ++m)
+			{
+				int y = (i - nVerBlurR + m) - nVerBlurR;// - nVerBlurR ->Map to source image
+				if (y < 0 || y >= nSrcH)
+					continue;
+				dFilteredValue += ((unsigned char *)bmpDataSrc)[(y * srcStride) + (j * PIXEL_SIZE) + nAlphaIndex] * matrixVer[m];
+			}
+			// Store result
+			rowDataDes[nColIndex + nAlphaIndex] = (dFilteredValue / matrixSumVer);
+		}
+	}
+	// Deallocate convolution matrix
+	delete[] matrixVer;
+}
+
+wxMacCoreGraphicsBitmapData *wxMacCoreGraphicsBitmapData::CreateShadowData(int nBlurRadius, unsigned char r, unsigned char g, unsigned char b, unsigned int a)
+{ 
+	if (m_hBitmap == NULL)
+		return NULL;
+	size_t m_width = GetWidth() ;
+	size_t m_height = GetHeight() ;
+	size_t m_bytesPerRow = GetBytesPerRow() ;
+	if (nBlurRadius <= 0)
+	{
+		wxMacCoreGraphicsBitmapData* pRetData = new wxMacCoreGraphicsBitmapData(GetRenderer(), *this);
+		unsigned char * data = (unsigned char *)pRetData->GetRawAccess();
+		applyShadowColor(data, m_width, m_height, pRetData->GetBytesPerRow(), r, g, b, a);
+		return pRetData;
+	}
+	else
+	{
+		wxMacCoreGraphicsBitmapData* pTmpData = new wxMacCoreGraphicsBitmapData(GetRenderer());
+		pTmpData->Create(m_width + 2 * nBlurRadius, m_height, 32, m_scaleFactor);
+		wxMacCoreGraphicsBitmapData* pRetData = new wxMacCoreGraphicsBitmapData(GetRenderer());
+		pRetData->Create(m_width + 2 * nBlurRadius, m_height + 2 * nBlurRadius, 32, m_scaleFactor);
+		
+		
+		unsigned char * bmpDataSrc = (unsigned char *)BeginRawAccess();
+		unsigned char * bmpDataTmp = (unsigned char *)pTmpData->BeginRawAccess();
+		int m_widthTmp = pTmpData->GetWidth() ;
+		int m_heightTmp = pTmpData->GetHeight() ;
+		size_t m_bytesPerRowTmp = pTmpData->GetBytesPerRow() ;
+		int m_widthRet = pRetData->GetWidth() ;
+		int m_heightRet = pRetData->GetHeight() ;
+		size_t m_bytesPerRowRet = pRetData->GetBytesPerRow() ;
+		applyAlphaGaussianBlurHorizontally(bmpDataSrc, m_width, m_height, m_bytesPerRow, nBlurRadius, bmpDataTmp, m_widthTmp, m_heightTmp, pTmpData->GetBytesPerRow());
+		pTmpData->EndRawAccess();
+		bmpDataTmp = (unsigned char *)pTmpData->BeginRawAccess();
+		unsigned char * bmpDataDes = (unsigned char *)pRetData->BeginRawAccess();
+		applyAlphaGaussianBlurVertically(bmpDataTmp, m_widthTmp, m_heightTmp, m_bytesPerRowTmp, nBlurRadius, bmpDataDes, m_widthRet, m_heightRet, m_bytesPerRowRet);
+		
+		applyShadowColor(bmpDataDes, m_widthRet, m_heightRet, m_bytesPerRowRet, r, g, b, a);
+		
+		pRetData->EndRawAccess();
+		pTmpData->EndRawAccess();
+		EndRawAccess();
+		delete pTmpData;
+		return pRetData;
+	}
+}
+
+void applyGaussianBlurVertically(const unsigned char * bmpDataSrc, int nSrcW, int nSrcH, int nSrcStride, int nVerBlurR, unsigned char * bmpDataDes, int nDesW, int nDesH, int nDesStride)
+{
+	
+	// Allocate space for convolution matrix
+	int matrixH = 2 * nVerBlurR + 1;
+	double *matrixVer = new double[matrixH];
+	
+	double matrixSumVer = 0;
+	double dSigma = nVerBlurR/3.0;
+	for (int i = 0; i < matrixH; ++i)
+	{
+		double x = i - nVerBlurR;
+		matrixVer[i] = (exp(-((x * x) / (2.0 * dSigma * dSigma)))) / (2.0 * M_PI * dSigma * dSigma);
+		matrixSumVer += matrixVer[i];
+	}
+	
+	//Blur vertically
+	for (int i = 0; i < nDesH; ++i)
+	{
+		unsigned char * rowDataDes =(unsigned char *)bmpDataDes + (i * nDesStride);
+		for (int j = 0; j < nDesW; ++j)
+		{
+			int nColIndex = j * PIXEL_SIZE;
+			// Compute filtered value
+			double dFilteredValue0 = 0;
+			double dFilteredValue1 = 0;
+			double dFilteredValue2 = 0;
+			double dFilteredValue3 = 0;
+			for (int m = 0; m < matrixH; ++m)
+			{
+				int y = (i - nVerBlurR + m) - nVerBlurR;// - nVerBlurR ->Map to source image
+				if (y < 0 || y >= nSrcH)
+					continue;
+				int nIndex = (y * nSrcStride) + (j * PIXEL_SIZE);
+				dFilteredValue0 += ((unsigned char *)bmpDataSrc)[nIndex]		* matrixVer[m];
+				dFilteredValue1 += ((unsigned char *)bmpDataSrc)[nIndex + 1]	* matrixVer[m];
+				dFilteredValue2 += ((unsigned char *)bmpDataSrc)[nIndex + 2]	* matrixVer[m];
+				dFilteredValue3 += ((unsigned char *)bmpDataSrc)[nIndex + 3]	* matrixVer[m];
+			}
+			// Store result
+			rowDataDes[nColIndex]		= (dFilteredValue0 / matrixSumVer);
+			rowDataDes[nColIndex + 1]	= (dFilteredValue1 / matrixSumVer);
+			rowDataDes[nColIndex + 2]	= (dFilteredValue2 / matrixSumVer);
+			rowDataDes[nColIndex + 3]	= (dFilteredValue3 / matrixSumVer);
+		}
+	}
+	// Deallocate convolution matrix
+	delete[] matrixVer;
+}
+
+void applyGaussianBlurHorizontally(const unsigned char * bmpDataSrc, int nSrcW, int nSrcH, int nSrcStride, int nHozBlurR, unsigned char * bmpDataDes, int nDesW, int nDesH, int nDesStride)
+{
+	
+	// Allocate space for convolution matrix
+	int matrixW = 2 * nHozBlurR + 1;
+	double *matrixHoz = new double[matrixW];
+	
+	// Fill in the convolution matrix
+	double matrixSumHoz = 0;
+	double dSigma = nHozBlurR/3.0;
+	for (int j = 0; j < matrixW; ++j)
+	{
+		double x = j - nHozBlurR;
+		matrixHoz[j] = (exp(-((x * x) / (2.0 * dSigma * dSigma)))) / (2.0 * M_PI * dSigma * dSigma);
+		matrixSumHoz += matrixHoz[j];
+	}
+	
+	//Blur horizontally
+	for (int i = 0; i < nDesH; ++i)
+	{
+		unsigned char * rowDataDes =(unsigned char *)bmpDataDes + (i * nDesStride);
+		for (int j = 0; j < nDesW; ++j)
+		{
+			int nColIndex = j * PIXEL_SIZE;
+			// Compute filtered value
+			double dFilteredValue0 = 0;
+			double dFilteredValue1 = 0;
+			double dFilteredValue2 = 0;
+			double dFilteredValue3 = 0;
+			for (int n = 0; n < matrixW; ++n)
+			{
+				int x = (j - nHozBlurR + n) - nHozBlurR; // - nHozBlurR ->Map to source image
+				if (x < 0 || x >= nSrcW)
+					continue;
+				int nIndex = (i * nSrcStride) + (x * PIXEL_SIZE);
+				dFilteredValue0 += ((unsigned char *)bmpDataSrc)[nIndex] * matrixHoz[n];
+				dFilteredValue1 += ((unsigned char *)bmpDataSrc)[nIndex + 1] * matrixHoz[n];
+				dFilteredValue2 += ((unsigned char *)bmpDataSrc)[nIndex + 2] * matrixHoz[n];
+				dFilteredValue3 += ((unsigned char *)bmpDataSrc)[nIndex + 3] * matrixHoz[n];
+			}
+			// Store result
+			rowDataDes[nColIndex]		= (dFilteredValue0 / matrixSumHoz);
+			rowDataDes[nColIndex + 1]	= (dFilteredValue1 / matrixSumHoz);
+			rowDataDes[nColIndex + 2]	= (dFilteredValue2 / matrixSumHoz);
+			rowDataDes[nColIndex + 3]	= (dFilteredValue3 / matrixSumHoz);
+		}
+	}
+	// Deallocate convolution matrix
+	delete[] matrixHoz;
+}
+
+wxMacCoreGraphicsBitmapData *wxMacCoreGraphicsBitmapData::CreateBlurredData(int nBlurRadiusH, int nBlurRadiusV)
+{ 
+	if (GetRawAccess() == NULL)
+		return NULL;
+	if (nBlurRadiusH <= 0 && nBlurRadiusV <= 0)
+	{
+		return new wxMacCoreGraphicsBitmapData(GetRenderer(), *this);;
+	}
+	else
+	{
+		wxMacCoreGraphicsBitmapData* pRetData = NULL;
+		wxMacCoreGraphicsBitmapData* pSrcData = this;
+		
+		bool bTwoPass = (nBlurRadiusH >0 && nBlurRadiusV > 0);
+		
+		if (nBlurRadiusH > 0)
+		{
+			pRetData = new wxMacCoreGraphicsBitmapData(GetRenderer(), pSrcData->GetWidth() + 2 * nBlurRadiusH, pSrcData->GetHeight(), m_scaleFactor);
+			
+			//Blur horizontally
+			
+			unsigned char * bmpDataSrc = (unsigned char *)pSrcData->GetRawAccess();
+			unsigned char * bmpDataDes = (unsigned char *)pRetData->BeginRawAccess();
+			
+			applyGaussianBlurHorizontally(bmpDataSrc, pSrcData->GetWidth(), pSrcData->GetHeight(), pSrcData->GetBytesPerRow(), nBlurRadiusH, bmpDataDes, pRetData->GetWidth(), pRetData->GetHeight(), pRetData->GetBytesPerRow());
+			pRetData->EndRawAccess();
+		}
+		if (bTwoPass)
+			pSrcData = pRetData;
+		
+		if (nBlurRadiusV > 0)
+		{
+			pRetData = new wxMacCoreGraphicsBitmapData(GetRenderer(), pSrcData->GetWidth(), pSrcData->GetHeight() + 2 * nBlurRadiusV, m_scaleFactor);
+			
+			//Blur horizontally
+			
+			unsigned char * bmpDataSrc = (unsigned char *)pSrcData->GetRawAccess();
+			unsigned char * bmpDataDes = (unsigned char *)pRetData->BeginRawAccess();
+			
+			applyGaussianBlurVertically(bmpDataSrc, pSrcData->GetWidth(), pSrcData->GetHeight(), pSrcData->GetBytesPerRow(), nBlurRadiusV, bmpDataDes, pRetData->GetWidth(), pRetData->GetHeight(), pRetData->GetBytesPerRow());
+			pRetData->EndRawAccess();
+		}
+		if (bTwoPass)
+			delete pSrcData;
+		return pRetData;
+	}
+	return NULL;
+}
+
+WXImage wxMacCoreGraphicsBitmapData::GetImage() const
+{ 
+	wxCHECK_MSG( IsOk() , 0 , "Invalid Bitmap");
+	
+	if ( !m_nsImage )
+	{
+		wxCFRef< CGImageRef > cgimage(CreateCGImage());
+		return wxOSXGetImageFromCGImage( cgimage, GetScaleFactor(), IsTemplate() );
+	}
+	
+	return m_nsImage;
 }
 
 
@@ -1028,7 +2454,8 @@ void wxMacCoreGraphicsMatrixData::Scale( wxDouble xScale , wxDouble yScale )
 // add the rotation to this matrix (radians)
 void wxMacCoreGraphicsMatrixData::Rotate( wxDouble angle )
 {
-    m_matrix = CGAffineTransformRotate( m_matrix, (CGFloat) angle);
+	CGFloat angleRadial = (angle/360)*2*pi;
+    m_matrix = CGAffineTransformRotate( m_matrix, (CGFloat) angleRadial);
 }
 
 //
@@ -1128,7 +2555,14 @@ public :
     // gets the bounding box enclosing all points (possibly including control points)
     virtual void GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE;
 
+    //gets the bounding box including the width of the pen
+    virtual void GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const wxOVERRIDE;
+    
     virtual bool Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle = wxODDEVEN_RULE) const wxOVERRIDE;
+    
+    virtual bool OutlineContains(wxDouble x, wxDouble y, const wxGraphicsPenData* pen) const wxOVERRIDE;
+    
+    virtual void ConvertToStrokePath(const wxGraphicsPenData* pen) wxOVERRIDE;
 private :
     CGMutablePathRef m_path;
 };
@@ -1287,9 +2721,44 @@ void wxMacCoreGraphicsPathData::GetBox(wxDouble *x, wxDouble *y, wxDouble *w, wx
     *h = bounds.size.height;
 }
 
+void wxMacCoreGraphicsPathData::GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphicsMatrixData* matrix, wxDouble *x, wxDouble *y, wxDouble *w, wxDouble *h) const
+{
+	CGMutablePathRef* matrixNative = NULL;
+	
+	if (matrix)
+		matrixNative = (CGMutablePathRef*)matrix->GetNativeMatrix();
+	
+	CGRect bounds;
+	bounds = CGPathGetPathBoundingBox(m_path);
+	*x = bounds.origin.x;
+	*y = bounds.origin.y;
+	*w = bounds.size.width;
+	*h = bounds.size.height;
+}
+
 bool wxMacCoreGraphicsPathData::Contains( wxDouble x, wxDouble y, wxPolygonFillMode fillStyle) const
 {
     return CGPathContainsPoint( m_path, NULL, CGPointMake((CGFloat) x,(CGFloat) y), fillStyle == wxODDEVEN_RULE );
+}
+
+bool wxMacCoreGraphicsPathData::OutlineContains( wxDouble x, wxDouble y, const wxGraphicsPenData* pen ) const
+{
+    CGPathRef strokedPath = CGPathCreateCopyByStrokingPath(m_path, NULL, 15,
+                                                           kCGLineCapRound, kCGLineJoinRound, 1);
+    bool bIsContains = CGPathContainsPoint(strokedPath, NULL, CGPointMake(x, y), false);
+    CGPathRelease(strokedPath);
+    return bIsContains;
+}
+
+void wxMacCoreGraphicsPathData::ConvertToStrokePath( const wxGraphicsPenData* pen /*= NULL*/ )
+{
+    const wxMacCoreGraphicsPenData* penData = (wxMacCoreGraphicsPenData*)pen;
+    if (m_path)
+    {
+        CGPathRef cgPathCopy = CGPathCreateCopyByDashingPath(m_path, NULL, 0, penData->GetLengths(), penData->GetCount());
+        m_path = (CGMutablePathRef) CGPathCreateCopyByStrokingPath(cgPathCopy, NULL, penData->GetWidth(), penData->GetCap(), penData->GetJoin(), 10);
+        CGPathRelease(cgPathCopy);
+    }
 }
 
 //
@@ -1312,6 +2781,8 @@ public:
     wxMacCoreGraphicsContext( wxGraphicsRenderer* renderer, wxWindow* window );
 
     wxMacCoreGraphicsContext( wxGraphicsRenderer* renderer);
+	
+	wxMacCoreGraphicsContext( wxGraphicsRenderer* renderer, wxGraphicsBitmap& bitmap);
 
     ~wxMacCoreGraphicsContext();
 
@@ -1428,6 +2899,8 @@ public:
     virtual void DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) wxOVERRIDE;
 
     virtual void DrawIcon( const wxIcon &icon, wxDouble x, wxDouble y, wxDouble w, wxDouble h ) wxOVERRIDE;
+	
+	virtual void DrawBitmap( const wxGraphicsBitmap &bmp, const wxRect2DDouble& rcSrc, const wxRect2DDouble& rcDest) wxOVERRIDE;
 
     // fast convenience methods
 
@@ -1516,7 +2989,11 @@ void wxMacCoreGraphicsContext::Init()
 #endif
     m_invisible = false;
     m_antialias = wxANTIALIAS_DEFAULT;
-    m_interpolation = wxINTERPOLATION_DEFAULT;
+    m_interpolation = wxINTERPOLATION_BEST;
+	m_composition = wxCOMPOSITION_SOURCE;
+	wxFont font = wxSystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+	wxColour color = wxSystemSettings::GetColour(wxSYS_COLOUR_MENUTEXT);
+	SetFont(font.IsOk() ? font : *wxNORMAL_FONT, color.IsOk() ? color : *wxBLACK);
 }
 
 wxMacCoreGraphicsContext::wxMacCoreGraphicsContext( wxGraphicsRenderer* renderer,
@@ -2131,12 +3608,20 @@ void wxMacCoreGraphicsContext::FillPath( const wxGraphicsPath &path , wxPolygonF
         CGContextSaveGState( m_cgContext );
         CGContextAddPath( m_cgContext , (CGPathRef) path.GetNativePath() );
         CGContextClip( m_cgContext );
+		if(((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->IsTransform())
+			CGContextConcatCTM( m_cgContext, *((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->GetTransform());
         CGContextDrawShading( m_cgContext, ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->GetShading() );
         CGContextRestoreGState( m_cgContext);
     }
     else
     {
-        ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->Apply(this);
+		wxMacCoreGraphicsBrushData* brush = (wxMacCoreGraphicsBrushData*)m_brush.GetRefData();
+		if(brush->IsImageFill() && !brush->IsTransform())
+		{
+			CGAffineTransform contextTransform = ( m_cgContext == NULL ? m_windowTransform : CGContextGetCTM( m_cgContext ));
+			brush->SetScaleContext(std::fabs((CGFloat) contextTransform.a) , std::fabs((CGFloat) contextTransform.d ));
+		}
+		brush->Apply(this);
         CGContextAddPath( m_cgContext , (CGPathRef) path.GetNativePath() );
         if ( fillStyle == wxODDEVEN_RULE )
             CGContextEOFillPath( m_cgContext );
@@ -2225,46 +3710,16 @@ void wxMacCoreGraphicsContext::DrawBitmap( const wxBitmap &bmp, wxDouble x, wxDo
 
 void wxMacCoreGraphicsContext::DrawBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h )
 {
-    if (!EnsureIsValid())
-        return;
-
-    if (m_composition == wxCOMPOSITION_DEST)
-        return;
-
-#ifdef __WXMAC__
-    wxMacCoreGraphicsBitmapData* refdata = static_cast<wxMacCoreGraphicsBitmapData*>(bmp.GetRefData());
-    CGImageRef image = refdata->GetBitmap();
-    CGRect r = CGRectMake( (CGFloat) x , (CGFloat) y , (CGFloat) w , (CGFloat) h );
-    if ( refdata->IsMonochrome() == 1 )
-    {
-        // is a mask, the '1' in the mask tell where to draw the current brush
-        if (  !m_brush.IsNull() )
-        {
-            if ( ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->IsShading() )
-            {
-                // TODO clip to mask
-            /*
-                CGContextSaveGState( m_cgContext );
-                CGContextAddPath( m_cgContext , (CGPathRef) path.GetNativePath() );
-                CGContextClip( m_cgContext );
-                CGContextDrawShading( m_cgContext, ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->GetShading() );
-                CGContextRestoreGState( m_cgContext);
-            */
-            }
-            else
-            {
-                ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->Apply(this);
-                wxMacDrawCGImage( m_cgContext , &r , image );
-            }
-        }
-    }
-    else
-    {
-        wxMacDrawCGImage( m_cgContext , &r , image );
-    }
+#if wxOSX_USE_COCOA
+	{
+		CGRect r = CGRectMake( (CGFloat) x , (CGFloat) y , (CGFloat) w , (CGFloat) h );
+		const wxGraphicsBitmapData* pData = bmp.GetBitmapData();
+		wxOSXDrawNSImage( m_cgContext, &r, pData->GetImage());
+	}
+#else
+	wxGraphicsBitmap bitmap = GetRenderer()->CreateBitmap(bmp);
+	DrawBitmap(bitmap, x, y, w, h);
 #endif
-
-    CheckInvariants();
 }
 
 void wxMacCoreGraphicsContext::DrawIcon( const wxIcon &icon, wxDouble x, wxDouble y, wxDouble w, wxDouble h )
@@ -2565,6 +4020,61 @@ wxGraphicsMatrix wxMacCoreGraphicsContext::GetTransform() const
     return m;
 }
 
+void wxMacCoreGraphicsContext::DrawBitmap(const wxGraphicsBitmap &bmp, const wxRect2DDouble &rcSrc, const wxRect2DDouble &rcDest)
+{ 
+	if (!EnsureIsValid())
+		return;
+	//if (m_composition == wxCOMPOSITION_DEST) return;
+	
+	wxMacCoreGraphicsBitmapData* refdata = static_cast<wxMacCoreGraphicsBitmapData*>(bmp.GetRefData());
+	CGImageRef image = static_cast<CGImageRef>(refdata->GetNativeBitmap());
+	CGRect cgSrc = CGRectMake( (CGFloat) rcSrc.m_x , (CGFloat) rcSrc.m_y , rcSrc.m_width , rcSrc.m_height );
+	CGRect cgDest = CGRectMake( (CGFloat) rcDest.m_x, (CGFloat) rcDest.m_y, rcDest.m_width , rcDest.m_height );
+	CGImageRef cgSubimage = CGImageCreateWithImageInRect (image, cgSrc);
+	if (!m_brush.IsNull() )
+	{
+		if ( ((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->IsShading() )
+		{
+			
+		}
+		else
+		{
+			((wxMacCoreGraphicsBrushData*)m_brush.GetRefData())->Apply(this);
+			wxMacDrawCGImage( m_cgContext , &cgDest , cgSubimage );
+		}
+	}
+	else
+	{
+		wxMacDrawCGImage( m_cgContext , &cgDest , cgSubimage );
+	}
+	CGImageRelease(cgSubimage);
+	CGImageRelease(image);
+}
+
+wxMacCoreGraphicsContext::wxMacCoreGraphicsContext(wxGraphicsRenderer* renderer, wxGraphicsBitmap &bitmap) : wxGraphicsContext(renderer)
+{ 
+	Init();
+	m_initTransform = m_windowTransform = CGAffineTransformIdentity;
+	if (!bitmap.IsNull())
+	{
+		bitmap.UnShare();
+		wxGraphicsBitmapData* pData = bitmap.GetBitmapData();
+		pData->BeginRawAccess() ;
+		CGColorSpaceRef genericColorSpace = wxMacGetGenericRGBColorSpace();
+		CGContextRef bmCtx = pData->GetBitmapContext();
+		
+		if ( bmCtx )
+		{
+			CGContextSetFillColorSpace( bmCtx, genericColorSpace );
+			CGContextSetStrokeColorSpace( bmCtx, genericColorSpace );
+			SetNativeContext(bmCtx);
+		}
+		pData->EndRawAccess();
+	}
+}
+
+
+
 
 #if wxUSE_IMAGE
 
@@ -2636,6 +4146,8 @@ public :
     virtual wxGraphicsContext * CreateContextFromNativeWindow( void * window ) wxOVERRIDE;
 
     virtual wxGraphicsContext * CreateContext( wxWindow* window ) wxOVERRIDE;
+    
+    virtual wxGraphicsContext * CreateContextFromBitmap(wxGraphicsBitmap& image) wxOVERRIDE;
 
 #if wxUSE_IMAGE
     virtual wxGraphicsContext * CreateContextFromImage(wxImage& image) wxOVERRIDE;
@@ -2656,6 +4168,10 @@ public :
     virtual wxGraphicsPen CreatePen(const wxGraphicsPenInfo& info) wxOVERRIDE ;
 
     virtual wxGraphicsBrush CreateBrush(const wxBrush& brush ) wxOVERRIDE ;
+	
+	virtual wxGraphicsBrush CreateBrush( wxUint32 nARGB ) wxOVERRIDE;
+	
+	virtual wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bmp) wxOVERRIDE ;
 
     virtual wxGraphicsBrush
     CreateLinearGradientBrush(wxDouble x1, wxDouble y1,
@@ -2677,6 +4193,7 @@ public :
 
     // create a native bitmap representation
     virtual wxGraphicsBitmap CreateBitmap( const wxBitmap &bitmap ) wxOVERRIDE ;
+	virtual wxGraphicsBitmap CreateBitmap( int w, int h, wxDouble scale = 1 ) wxOVERRIDE;
 
 #if wxUSE_IMAGE
     virtual wxGraphicsBitmap CreateBitmapFromImage(const wxImage& image) wxOVERRIDE;
@@ -2838,12 +4355,26 @@ wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush(const wxBrush& brush )
     }
 }
 
+wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush( wxUint32 nARGB )
+{
+	wxGraphicsBrush p;
+	p.SetRefData(new wxMacCoreGraphicsBrushData( this, nARGB ));
+	return p;
+}
+
+wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush(const wxGraphicsBitmap& bmp)
+{
+	wxGraphicsBrush p;
+	p.SetRefData(new wxMacCoreGraphicsBrushData( this, bmp ));
+	return p;
+}
+
 wxGraphicsBitmap wxMacCoreGraphicsRenderer::CreateBitmap( const wxBitmap& bmp )
 {
     if ( bmp.IsOk() )
     {
         wxGraphicsBitmap p;
-        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , bmp.CreateCGImage(), bmp.GetDepth() == 1 ) );
+        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , bmp.CreateCGImage() ) );
         return p;
     }
     else
@@ -2877,7 +4408,7 @@ wxGraphicsBitmap wxMacCoreGraphicsRenderer::CreateBitmapFromNativeBitmap( void* 
     if ( bitmap != NULL )
     {
         wxGraphicsBitmap p;
-        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , (CGImageRef) bitmap, false ));
+        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , (CGImageRef) bitmap ));
         return p;
     }
     else
@@ -2886,13 +4417,13 @@ wxGraphicsBitmap wxMacCoreGraphicsRenderer::CreateBitmapFromNativeBitmap( void* 
 
 wxGraphicsBitmap wxMacCoreGraphicsRenderer::CreateSubBitmap( const wxGraphicsBitmap &bmp, wxDouble x, wxDouble y, wxDouble w, wxDouble h  )
 {
-    wxMacCoreGraphicsBitmapData* refdata  =static_cast<wxMacCoreGraphicsBitmapData*>(bmp.GetRefData());
-    CGImageRef img = refdata->GetBitmap();
+    wxMacCoreGraphicsBitmapData* refdata = static_cast<wxMacCoreGraphicsBitmapData*>(bmp.GetRefData());
+    CGImageRef img = refdata->CreateCGImage();
     if ( img )
     {
         wxGraphicsBitmap p;
-        CGImageRef subimg = CGImageCreateWithImageInRect(img,CGRectMake( (CGFloat) x , (CGFloat) y , (CGFloat) w , (CGFloat) h ));
-        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , subimg, refdata->IsMonochrome() ) );
+        CGImageRef subimg = CGImageCreateWithImageInRect(img, CGRectMake( (CGFloat) x , (CGFloat) y , (CGFloat) w , (CGFloat) h ));
+        p.SetRefData(new wxMacCoreGraphicsBitmapData( this , subimg ) );
         return p;
     }
     else
@@ -2965,6 +4496,23 @@ wxMacCoreGraphicsRenderer::CreateFont(double sizeInPixels,
     wxGraphicsFont f;
     f.SetRefData(new wxMacCoreGraphicsFontData(this, font, col));
     return f;
+}
+
+wxGraphicsContext *wxMacCoreGraphicsRenderer::CreateContextFromBitmap(wxGraphicsBitmap &image)
+{ 
+	return new wxMacCoreGraphicsContext(this, image);
+}
+
+wxGraphicsBitmap wxMacCoreGraphicsRenderer::CreateBitmap(int w, int h, wxDouble scale)
+{
+	if ( w > 0 && h > 0 )
+	{
+		wxGraphicsBitmap p;
+		p.SetRefData(new wxMacCoreGraphicsBitmapData( this, w, h, scale ));
+		return p;
+	}
+	else
+		return wxNullGraphicsBitmap;
 }
 
 //

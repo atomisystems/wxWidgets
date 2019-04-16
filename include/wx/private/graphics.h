@@ -61,9 +61,30 @@ public :
     virtual void * GetNativeBitmap() const = 0;
     virtual int GetWidth() const = 0;
     virtual int GetHeight() const = 0;
-    int GetScaledWidth() const { return wxRound(GetWidth() / m_scaleFactor); }
-    int GetScaledHeight() const  { return wxRound(GetHeight() / m_scaleFactor);};
+	int GetScaledWidth() const { return wxRound(GetWidth() / m_scaleFactor); }
+	int GetScaledHeight() const  { return wxRound(GetHeight() / m_scaleFactor); }
     double GetScaleFactor() const { return m_scaleFactor; }
+	
+#ifdef __WXMAC__
+	virtual bool HasAlpha() const = 0;
+	virtual wxColour GetPixel(int x, int y) = 0;
+	
+	virtual bool FillBGRA(unsigned char* pDataDest, int nLineSize) = 0;
+	virtual bool FillARGB(unsigned char* pDataDest, int nLineSize) = 0;
+	virtual bool FillBGR24(unsigned char* pDataDest, int nLineSize, bool bNoAlphaHint = false) = 0;
+	
+	virtual bool SetBGRA(const unsigned char* pBGRA, int nLineSize) = 0;
+	virtual bool SetARGB(const unsigned char* pBGRA, int nLineSize) = 0;
+	virtual void MakeTransparent() = 0;
+	virtual void ChangeData(void (*fptr)(void* rowData, int w, void* optionData), void* optionData) = 0;
+	
+	virtual wxGraphicsBitmapData* CreateShadowData( int nBlurRadius, unsigned char r, unsigned char g, unsigned char b, unsigned a ) = 0;
+	virtual wxGraphicsBitmapData* CreateBlurredData( int nBlurRadiusH, int nBlurRadiusV) = 0;
+	virtual void *BeginRawAccess() = 0;
+	virtual void EndRawAccess() = 0;
+	virtual CGContextRef GetBitmapContext() const = 0;
+	virtual WXImage GetImage() const = 0;
+#endif
 
 protected:
        double m_scaleFactor;

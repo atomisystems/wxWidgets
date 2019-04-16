@@ -828,9 +828,11 @@ void wxAuiManager::UpdateHintWindowConfig()
         if (wxDynamicCast(w, wxFrame))
         {
             wxFrame* f = static_cast<wxFrame*>(w);
-            can_do_transparent = f->CanSetTransparent();
-
-            break;
+			if(f->GetWXWindow())
+			{
+				can_do_transparent = f->CanSetTransparent();
+				break;
+			}
         }
 
         w = w->GetParent();
