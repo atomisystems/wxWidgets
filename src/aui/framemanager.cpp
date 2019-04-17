@@ -612,7 +612,6 @@ wxAuiManager::wxAuiManager(wxWindow* managed_wnd, unsigned int flags)
 {
     m_action = actionNone;
     m_actionWindow = NULL;
-    m_lastMouseMove = wxPoint();
     m_hoverButton = NULL;
     m_art = new wxAuiDefaultDockArt;
     m_hintWnd = NULL;
@@ -1677,7 +1676,7 @@ void wxAuiManager::GetPanePositionsAndSizes(wxAuiDockInfo& dock,
     positions.Empty();
     sizes.Empty();
 
-    int offset, action_pane = -1;
+    int action_pane = -1;
     int pane_i, pane_count = dock.panes.GetCount();
 
     // find the pane marked as our action pane
@@ -1728,22 +1727,19 @@ void wxAuiManager::GetPanePositionsAndSizes(wxAuiDockInfo& dock,
     if (action_pane == -1)
         return;
 
-    offset = 0;
     for (pane_i = action_pane-1; pane_i >= 0; --pane_i)
     {
         int amount = positions[pane_i+1] - (positions[pane_i] + sizes[pane_i]);
 
         if (amount >= 0)
-            offset += amount;
+            ;
         else
             positions[pane_i] -= -amount;
-
-        offset += sizes[pane_i];
     }
 
     // if the dock mode is fixed, make sure none of the panes
     // overlap; we will bump panes that overlap
-    offset = 0;
+    int offset = 0;
     for (pane_i = action_pane; pane_i < pane_count; ++pane_i)
     {
         int amount = positions[pane_i] - offset;
@@ -1923,7 +1919,7 @@ void wxAuiManager::LayoutAddPane(wxSizer* cont,
     }
     else
     {
-        sizer_item = cont->Add(horz_pane_sizer, pane_proportion, wxEXPAND);
+        cont->Add(horz_pane_sizer, pane_proportion, wxEXPAND);
     }
 }
 

@@ -199,7 +199,6 @@ void wxRibbonPage::CommonInit(const wxString& label, const wxBitmap& icon)
     SetName(label);
 
     SetLabel(label);
-    m_old_size = wxSize(0, 0);
     m_icon = icon;
     m_scroll_left_btn = NULL;
     m_scroll_right_btn = NULL;
@@ -1018,7 +1017,6 @@ bool wxRibbonPage::CollapsePanels(wxOrientation direction, int minimum_amount)
     bool collapsed_something = false;
     while(minimum_amount > 0)
     {
-        int largest_size = 0;
         wxRibbonPanel* largest_panel = NULL;
         wxSize* largest_panel_size = NULL;
         wxSize* panel_size = m_size_calc_array;
@@ -1042,6 +1040,7 @@ bool wxRibbonPage::CollapsePanels(wxOrientation direction, int minimum_amount)
         }
         else
         {
+            int largest_size = 0;
             for(wxWindowList::compatibility_iterator node = GetChildren().GetFirst();
                       node;
                       node = node->GetNext(), ++panel_size )
