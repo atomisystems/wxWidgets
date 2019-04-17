@@ -674,7 +674,7 @@ void WXDLLIMPEXP_CORE wxGraphicsBitmapSetBGRAData(wxGraphicsBitmap& bmp, const u
 	pBitmapData->SetBGRA(pDataSrc, nLineSize);
 }
 
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetABGRData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize)
+void WXDLLIMPEXP_CORE wxGraphicsBitmapSetARGBData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize)
 {
 	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
 	pBitmapData->SetARGB(pDataSrc, nLineSize);

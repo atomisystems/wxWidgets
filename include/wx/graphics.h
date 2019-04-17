@@ -256,7 +256,7 @@ bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillBGR24Buffer(const wxGraphicsBitmap& bm
 
 void WXDLLIMPEXP_CORE wxGraphicsBitmapSetBGRAData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize);
 
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetABGRData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize);
+void WXDLLIMPEXP_CORE wxGraphicsBitmapSetARGBData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize);
 
 void WXDLLIMPEXP_CORE wxGraphicsBitmapChangeData(wxGraphicsBitmap& bmp, void(*fptr)(void* rowData, int w, void* optionData), void* optionData);
 #endif
