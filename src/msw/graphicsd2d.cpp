@@ -968,6 +968,57 @@ bool operator==(const D2D1::Matrix3x2F& lhs, const D2D1::Matrix3x2F& rhs)
 }
 
 
+
+class wxD2DBitmapResourceHolder : public wxD2DResourceHolder<ID2D1Bitmap>
+{
+public:
+    wxD2DBitmapResourceHolder(const wxBitmap& sourceBitmap) :
+        m_sourceBitmap(sourceBitmap)
+    {
+    }
+
+    wxBitmap& GetSourceBitmap() { return m_sourceBitmap; }
+    const wxBitmap& GetSourceBitmap() const { return m_sourceBitmap; }
+
+protected:
+    void DoAcquireResource() wxOVERRIDE;
+
+private:
+    wxBitmap m_sourceBitmap;
+};
+
+//-----------------------------------------------------------------------------
+// wxD2DBitmapData declaration
+//-----------------------------------------------------------------------------
+
+class wxD2DBitmapData : public wxGraphicsBitmapData, public wxD2DManagedGraphicsData
+{
+public:
+    typedef wxD2DBitmapResourceHolder NativeType;
+
+    wxD2DBitmapData(wxGraphicsRenderer* renderer, const wxBitmap& bitmap) :
+        wxGraphicsBitmapData(renderer), m_bitmapHolder(bitmap) {}
+
+    wxD2DBitmapData(wxGraphicsRenderer* renderer, const void* pseudoNativeBitmap) :
+        wxGraphicsBitmapData(renderer), m_bitmapHolder(*static_cast<const NativeType*>(pseudoNativeBitmap)) {}
+
+    // returns the native representation
+    void* GetNativeBitmap() const wxOVERRIDE;
+
+    wxCOMPtr<ID2D1Bitmap> GetD2DBitmap();
+
+    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
+    {
+        return &m_bitmapHolder;
+    }
+    virtual int GetWidth() const { return m_bitmapHolder.GetSourceBitmap().GetWidth(); }
+    virtual int GetHeight() const { return m_bitmapHolder.GetSourceBitmap().GetHeight(); }
+
+private:
+    NativeType m_bitmapHolder;
+};
+
+
 //-----------------------------------------------------------------------------
 // wxD2DBrushData declaration
 //-----------------------------------------------------------------------------
@@ -976,7 +1027,7 @@ class wxD2DBrushData : public wxGraphicsBrushData, public wxD2DManagedGraphicsDa
 {
 public:
     wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush);
-
+    wxD2DBrushData(wxGraphicsRenderer* renderer, const wxD2DBitmapData& bitmap);
     wxD2DBrushData(wxGraphicsRenderer* renderer);
 
     void CreateLinearGradientBrush(wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2, const wxGraphicsGradientStops& stops);
@@ -2047,7 +2098,7 @@ void wxD2DPathData::GetWidenedBox(const wxGraphicsPenData* pen, const wxGraphics
 
 void wxD2DPathData::ConvertToStrokePath(const wxGraphicsPenData* pen)
 {
-	const wxD2DPenData* penData = static_cast<const wxD2DPenData*>(pen);
+    const wxD2DPenData* penData = static_cast<const wxD2DPenData*>(pen);
     if (m_pTransformedGeometries.size() == 0)   
     {
         HRESULT hr;
@@ -2341,119 +2392,72 @@ private:
     wxCOMPtr<IWICBitmapLock> m_pixelLock;
 };
 
-class wxD2DBitmapResourceHolder : public wxD2DResourceHolder<ID2D1Bitmap>
+void wxD2DBitmapResourceHolder::DoAcquireResource()
 {
-public:
-    wxD2DBitmapResourceHolder(const wxBitmap& sourceBitmap) :
-        m_sourceBitmap(sourceBitmap)
+    ID2D1RenderTarget* renderTarget = GetContext();
+
+    HRESULT hr;
+
+    if (m_sourceBitmap.GetMask())
     {
-    }
+        int w = m_sourceBitmap.GetWidth();
+        int h = m_sourceBitmap.GetHeight();
 
-    wxBitmap& GetSourceBitmap() { return m_sourceBitmap; }
-    const wxBitmap& GetSourceBitmap() const { return m_sourceBitmap; }
+        wxCOMPtr<IWICBitmapSource> colorBitmap = wxCreateWICBitmap(m_sourceBitmap);
+        wxCOMPtr<IWICBitmapSource> maskBitmap = wxCreateWICBitmap(m_sourceBitmap.GetMask()->GetMaskBitmap());
+        wxCOMPtr<IWICBitmap> resultBitmap;
 
-protected:
-    void DoAcquireResource() wxOVERRIDE
-    {
-        ID2D1RenderTarget* renderTarget = GetContext();
+        wxWICImagingFactory()->CreateBitmap(
+            w, h,
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapCacheOnLoad,
+            &resultBitmap);
 
-        HRESULT hr;
+        BYTE* colorBuffer = new BYTE[4 * w * h];
+        BYTE* maskBuffer = new BYTE[4 * w * h];
+        BYTE* resultBuffer;
 
-        if(m_sourceBitmap.GetMask())
+        hr = colorBitmap->CopyPixels(NULL, w * 4, 4 * w * h, colorBuffer);
+        hr = maskBitmap->CopyPixels(NULL, w * 4, 4 * w * h, maskBuffer);
+
         {
-            int w = m_sourceBitmap.GetWidth();
-            int h = m_sourceBitmap.GetHeight();
+            wxBitmapPixelWriteLock lock(resultBitmap);
 
-            wxCOMPtr<IWICBitmapSource> colorBitmap = wxCreateWICBitmap(m_sourceBitmap);
-            wxCOMPtr<IWICBitmapSource> maskBitmap = wxCreateWICBitmap(m_sourceBitmap.GetMask()->GetMaskBitmap());
-            wxCOMPtr<IWICBitmap> resultBitmap;
+            UINT bufferSize = 0;
+            hr = lock.GetLock()->GetDataPointer(&bufferSize, &resultBuffer);
 
-            wxWICImagingFactory()->CreateBitmap(
-                w, h,
-                GUID_WICPixelFormat32bppPBGRA,
-                WICBitmapCacheOnLoad,
-                &resultBitmap);
+            static const wxPBGRAColor transparentColor(wxTransparentColour);
 
-            BYTE* colorBuffer = new BYTE[4 * w * h];
-            BYTE* maskBuffer = new BYTE[4 * w * h];
-            BYTE* resultBuffer;
-
-            hr = colorBitmap->CopyPixels(NULL, w * 4, 4 * w * h, colorBuffer);
-            hr = maskBitmap->CopyPixels(NULL, w * 4, 4 * w * h, maskBuffer);
-
+            // Create the result bitmap
+            for (int i = 0; i < w * h * 4; i += 4)
             {
-                wxBitmapPixelWriteLock lock(resultBitmap);
+                wxPBGRAColor color(colorBuffer + i);
+                wxPBGRAColor mask(maskBuffer + i);
 
-                UINT bufferSize = 0;
-                hr = lock.GetLock()->GetDataPointer(&bufferSize, &resultBuffer);
-
-                static const wxPBGRAColor transparentColor(wxTransparentColour);
-
-                // Create the result bitmap
-                for (int i = 0; i < w * h * 4; i += 4)
+                if (mask.IsBlack())
                 {
-                    wxPBGRAColor color(colorBuffer + i);
-                    wxPBGRAColor mask(maskBuffer + i);
-
-                    if (mask.IsBlack())
-                    {
-                        transparentColor.Write(resultBuffer + i);
-                    }
-                    else
-                    {
-                        color.a = 255;
-                        color.Write(resultBuffer + i);
-                    }
+                    transparentColor.Write(resultBuffer + i);
+                }
+                else
+                {
+                    color.a = 255;
+                    color.Write(resultBuffer + i);
                 }
             }
-
-            hr = renderTarget->CreateBitmapFromWicBitmap(resultBitmap, 0, &m_nativeResource);
-            wxCHECK_HRESULT_RET(hr);
-
-            delete[] colorBuffer;
-            delete[] maskBuffer;
         }
-        else
-        {
-            wxCOMPtr<IWICBitmapSource> bitmapSource = wxCreateWICBitmap(m_sourceBitmap, m_sourceBitmap.HasAlpha());
-            hr = renderTarget->CreateBitmapFromWicBitmap(bitmapSource, 0, &m_nativeResource);
-        }
+
+        hr = renderTarget->CreateBitmapFromWicBitmap(resultBitmap, 0, &m_nativeResource);
+        wxCHECK_HRESULT_RET(hr);
+
+        delete[] colorBuffer;
+        delete[] maskBuffer;
     }
-
-private:
-    wxBitmap m_sourceBitmap;
-};
-
-//-----------------------------------------------------------------------------
-// wxD2DBitmapData declaration
-//-----------------------------------------------------------------------------
-
-class wxD2DBitmapData : public wxGraphicsBitmapData, public wxD2DManagedGraphicsData
-{
-public:
-    typedef wxD2DBitmapResourceHolder NativeType;
-
-    wxD2DBitmapData(wxGraphicsRenderer* renderer, const wxBitmap& bitmap) :
-        wxGraphicsBitmapData(renderer), m_bitmapHolder(bitmap) {}
-
-    wxD2DBitmapData(wxGraphicsRenderer* renderer, const void* pseudoNativeBitmap) :
-        wxGraphicsBitmapData(renderer), m_bitmapHolder(*static_cast<const NativeType*>(pseudoNativeBitmap)) {}
-
-    // returns the native representation
-    void* GetNativeBitmap() const wxOVERRIDE;
-
-    wxCOMPtr<ID2D1Bitmap> GetD2DBitmap();
-
-    wxD2DManagedObject* GetManagedObject() wxOVERRIDE
+    else
     {
-        return &m_bitmapHolder;
+        wxCOMPtr<IWICBitmapSource> bitmapSource = wxCreateWICBitmap(m_sourceBitmap, m_sourceBitmap.HasAlpha());
+        hr = renderTarget->CreateBitmapFromWicBitmap(bitmapSource, 0, &m_nativeResource);
     }
-    virtual int GetWidth() const { return m_bitmapHolder.GetSourceBitmap().GetWidth(); }
-    virtual int GetHeight() const { return m_bitmapHolder.GetSourceBitmap().GetHeight(); }
-
-private:
-    NativeType m_bitmapHolder;
-};
+}
 
 //-----------------------------------------------------------------------------
 // wxD2DBitmapData implementation
@@ -2550,6 +2554,37 @@ protected:
 
         wxCHECK_HRESULT_RET(result);
     }
+};
+
+class wxD2DBitmapBrushResourceHolder2 : public wxD2DBrushResourceHolder<ID2D1BitmapBrush>
+{
+public:
+    wxD2DBitmapBrushResourceHolder2(const wxD2DBitmapData& bitmap) : wxD2DBrushResourceHolder(wxNullBrush) 
+    {
+        m_data = new wxD2DBitmapData(bitmap.GetRenderer(), bitmap.GetNativeBitmap());
+    }
+    ~wxD2DBitmapBrushResourceHolder2()
+    {
+        delete m_data;
+    }
+
+protected:
+    void DoAcquireResource() wxOVERRIDE
+    {
+        if (!m_data)
+            return;
+        
+        HRESULT result = GetContext()->CreateBitmapBrush(
+            m_data->GetD2DBitmap(),
+            D2D1::BitmapBrushProperties(
+                D2D1_EXTEND_MODE_WRAP,
+                D2D1_EXTEND_MODE_WRAP,
+                D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR),
+            &m_nativeResource);
+
+        wxCHECK_HRESULT_RET(result);
+    }
+    wxD2DBitmapData* m_data;
 };
 
 class wxD2DHatchBrushResourceHolder : public wxD2DBrushResourceHolder<ID2D1BitmapBrush>
@@ -2669,6 +2704,12 @@ wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer, const wxBrush brush
 wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer)
     : wxGraphicsBrushData(renderer), m_brushResourceHolder(NULL)
 {
+}
+
+wxD2DBrushData::wxD2DBrushData(wxGraphicsRenderer* renderer, const wxD2DBitmapData& bitmap)
+    : wxGraphicsBrushData(renderer)
+{
+    m_brushResourceHolder = new wxD2DBitmapBrushResourceHolder2(bitmap);
 }
 
 void wxD2DBrushData::CreateLinearGradientBrush(
@@ -4342,7 +4383,7 @@ void wxD2DContext::DrawBitmap(const wxGraphicsBitmap& bmp, const wxRect2DDouble&
     wxD2DBitmapData* bitmapData = wxGetD2DBitmapData(bmp);
     bitmapData->Bind(this);
 
-    D2D1_RECT_F rectSrc = D2D1::RectF(rcSrc.m_x, rcSrc.m_y,	rcSrc.m_x + rcSrc.m_width, rcSrc.m_y + rcSrc.m_height);
+    D2D1_RECT_F rectSrc = D2D1::RectF(rcSrc.m_x, rcSrc.m_y, rcSrc.m_x + rcSrc.m_width, rcSrc.m_y + rcSrc.m_height);
     D2D1_RECT_F rectDest = D2D1::RectF(rcDest.m_x, rcDest.m_y, rcDest.m_x + rcDest.m_width, rcDest.m_y + rcDest.m_height);
 
     m_renderTargetHolder->DrawBitmap(
@@ -4740,6 +4781,7 @@ public :
     wxGraphicsPen CreatePen(const wxGraphicsPenInfo& info) wxOVERRIDE;
 
     wxGraphicsBrush CreateBrush(const wxBrush& brush) wxOVERRIDE;
+    wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bitmap) wxOVERRIDE;
 
     wxGraphicsBrush CreateLinearGradientBrush(
         wxDouble x1, wxDouble y1,
@@ -4935,6 +4977,21 @@ wxGraphicsBrush wxD2DRenderer::CreateBrush(const wxBrush& brush)
     {
         wxGraphicsBrush b;
         b.SetRefData(new wxD2DBrushData(this, brush));
+        return b;
+    }
+}
+
+wxGraphicsBrush wxD2DRenderer::CreateBrush(const wxGraphicsBitmap& bitmap)
+{
+    if (bitmap.IsNull())
+    {
+        return wxNullGraphicsBrush;
+    }
+    else
+    {
+        wxGraphicsBrush b;
+        wxD2DBitmapData* bitmapData = (wxD2DBitmapData*)(bitmap.GetGraphicsData());
+        b.SetRefData(new wxD2DBrushData(this, *bitmapData));
         return b;
     }
 }

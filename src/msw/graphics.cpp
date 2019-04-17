@@ -277,11 +277,32 @@ protected :
     wxDouble m_width;
 };
 
+class WXDLLIMPEXP_CORE wxGDIPlusBitmapData : public wxGraphicsBitmapData
+{
+public:
+    wxGDIPlusBitmapData(wxGraphicsRenderer* renderer, Bitmap* bitmap);
+    wxGDIPlusBitmapData(wxGraphicsRenderer* renderer, const wxBitmap &bmp);
+    ~wxGDIPlusBitmapData();
+
+    virtual Bitmap* GetGDIPlusBitmap() const { return m_bitmap; }
+    virtual void* GetNativeBitmap() const wxOVERRIDE { return m_bitmap; }
+    virtual int GetWidth() const { return m_bitmap->GetWidth(); }
+    virtual int GetHeight() const { return m_bitmap->GetHeight(); }
+#if wxUSE_IMAGE
+    wxImage ConvertToImage() const;
+#endif // wxUSE_IMAGE
+
+private:
+    Bitmap* m_bitmap;
+    Bitmap* m_helper;
+};
+
 class wxGDIPlusBrushData : public wxGraphicsBrushData
 {
 public:
     wxGDIPlusBrushData( wxGraphicsRenderer* renderer );
     wxGDIPlusBrushData( wxGraphicsRenderer* renderer, const wxBrush &brush );
+    wxGDIPlusBrushData( wxGraphicsRenderer* renderer, const wxGDIPlusBitmapData &bitmap);
     ~wxGDIPlusBrushData ();
 
     void CreateLinearGradientBrush(wxDouble x1, wxDouble y1,
@@ -312,25 +333,6 @@ private:
     GraphicsPath* m_brushPath;
 };
 
-class WXDLLIMPEXP_CORE wxGDIPlusBitmapData : public wxGraphicsBitmapData
-{
-public:
-    wxGDIPlusBitmapData( wxGraphicsRenderer* renderer, Bitmap* bitmap );
-    wxGDIPlusBitmapData( wxGraphicsRenderer* renderer, const wxBitmap &bmp );
-    ~wxGDIPlusBitmapData ();
-
-    virtual Bitmap* GetGDIPlusBitmap() { return m_bitmap; }
-    virtual void* GetNativeBitmap() const wxOVERRIDE { return m_bitmap; }
-    virtual int GetWidth() const { return m_bitmap->GetWidth(); }
-    virtual int GetHeight() const { return m_bitmap->GetHeight(); }
-#if wxUSE_IMAGE
-    wxImage ConvertToImage() const;
-#endif // wxUSE_IMAGE
-
-private :
-    Bitmap* m_bitmap;
-    Bitmap* m_helper;
-};
 
 class wxGDIPlusFontData : public wxGraphicsObjectRefData
 {
@@ -662,6 +664,8 @@ public :
 
     virtual wxGraphicsBrush CreateBrush(const wxBrush& brush ) wxOVERRIDE;
 
+    virtual wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bitmap) wxOVERRIDE;
+
     virtual wxGraphicsBrush
     CreateLinearGradientBrush(wxDouble x1, wxDouble y1,
                               wxDouble x2, wxDouble y2,
@@ -952,6 +956,19 @@ wxGDIPlusBrushData::wxGDIPlusBrushData( wxGraphicsRenderer* renderer , const wxB
     }
 }
 
+wxGDIPlusBrushData::wxGDIPlusBrushData(wxGraphicsRenderer* renderer, 
+                                       const wxGDIPlusBitmapData &bitmap)
+    : wxGraphicsBrushData(renderer)
+{
+    Init();
+    Bitmap* bitmapNative = bitmap.GetGDIPlusBitmap();
+    if (bitmapNative)
+    {
+        m_brushImage = bitmapNative->Clone(0, 0, bitmapNative->GetWidth(), bitmapNative->GetHeight(), bitmapNative->GetPixelFormat());
+        m_brush = new TextureBrush(m_brushImage);
+    }
+}
+
 wxGDIPlusBrushData::~wxGDIPlusBrushData()
 {
     delete m_brush;
@@ -1050,9 +1067,9 @@ void
 wxGDIPlusBrushData::Transform(const wxGraphicsMatrixData* matrix)
 {
     if (m_brush->GetType() == BrushTypeLinearGradient)
-		((LinearGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
-	else if (m_brush->GetType() == BrushTypePathGradient)
-		((PathGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
+        ((LinearGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
+    else if (m_brush->GetType() == BrushTypePathGradient)
+        ((PathGradientBrush*)(m_brush))->SetTransform((Matrix*)matrix->GetNativeMatrix());
 }
 
 //-----------------------------------------------------------------------------
@@ -2708,6 +2725,19 @@ wxGraphicsBrush wxGDIPlusRenderer::CreateBrush(const wxBrush& brush )
     {
         wxGraphicsBrush p;
         p.SetRefData(new wxGDIPlusBrushData( this, brush ));
+        return p;
+    }
+}
+
+wxGraphicsBrush wxGDIPlusRenderer::CreateBrush(const wxGraphicsBitmap& bitmap) 
+{
+    ENSURE_LOADED_OR_RETURN(wxNullGraphicsBrush);
+    if (bitmap.IsNull())
+        return wxNullGraphicsBrush;
+    else
+    {
+        wxGraphicsBrush p;
+        p.SetRefData(new wxGDIPlusBrushData(this, *((wxGDIPlusBitmapData*)(bitmap.GetBitmapData()))));
         return p;
     }
 }

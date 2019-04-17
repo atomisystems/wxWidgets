@@ -245,22 +245,6 @@ private:
     wxDECLARE_DYNAMIC_CLASS(wxGraphicsBitmap);
 };
 
-#ifdef __WXMAC__
-wxGraphicsBitmap WXDLLIMPEXP_CORE wxGraphicsBitmapCreateShadowBitmap(const wxGraphicsBitmap& bmp, int nRadius, wxUint32 nARGB);
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillBGRABuffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize);
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillARGBBuffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize);
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillBGR24Buffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize);
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetBGRAData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize);
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetARGBData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize);
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapChangeData(wxGraphicsBitmap& bmp, void(*fptr)(void* rowData, int w, void* optionData), void* optionData);
-#endif
-
 extern WXDLLIMPEXP_DATA_CORE(wxGraphicsBitmap) wxNullGraphicsBitmap;
 
 class WXDLLIMPEXP_CORE wxGraphicsMatrix : public wxGraphicsObject
@@ -567,6 +551,8 @@ public:
         { return DoCreatePen(info); }
 
     virtual wxGraphicsBrush CreateBrush(const wxBrush& brush ) const;
+
+    virtual wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bitmap) const;
 
     // sets the brush to a linear gradient, starting at (x1,y1) and ending at
     // (x2,y2) with the given boundary colours or the specified stops
@@ -971,12 +957,8 @@ public:
     virtual wxGraphicsPen CreatePen(const wxGraphicsPenInfo& info) = 0;
 
     virtual wxGraphicsBrush CreateBrush(const wxBrush& brush ) = 0;
-	
-	virtual wxGraphicsBrush CreateBrush( wxUint32 nARGB ) = 0;
-	
-#ifdef __WXMAC__
-	virtual wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bmp) = 0 ;
-#endif
+
+    virtual wxGraphicsBrush CreateBrush(const wxGraphicsBitmap& bmp) = 0 ;
 
     // Gradient brush creation functions may not honour all the stops specified
     // stops and use just its boundary colours (this is currently the case

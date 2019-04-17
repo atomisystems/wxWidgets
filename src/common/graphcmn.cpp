@@ -639,53 +639,6 @@ double wxGraphicsBitmap::GetScaleFactor() const
     return GetBitmapData()->GetScaleFactor();
 }
 
-#ifdef __WXMAC__
-wxGraphicsBitmap WXDLLIMPEXP_CORE wxGraphicsBitmapCreateShadowBitmap(const wxGraphicsBitmap& bmp, int nRadius, wxUint32 nARGB)
-{
-	wxColour color = wxColour((nARGB >> 16) & 0xFF, (nARGB >> 8) & 0xFF, nARGB & 0xFF, (nARGB >> 24) & 0xFF);
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	wxGraphicsBitmapData* pShadowBitmapData = pBitmapData->CreateShadowData(nRadius, color.Red(), color.Green(), color.Blue(), color.Alpha());
-	wxGraphicsBitmap bitmap;
-	bitmap.SetRefData(pShadowBitmapData);
-	return bitmap;
-}
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillBGRABuffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	return pBitmapData->FillBGRA(pDataDest, nLineSize);
-}
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillARGBBuffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	return pBitmapData->FillARGB(pDataDest, nLineSize);
-}
-
-bool WXDLLIMPEXP_CORE wxGraphicsBitmapFillBGR24Buffer(const wxGraphicsBitmap& bmp, unsigned char* pDataDest, int nLineSize)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	return pBitmapData->FillBGR24(pDataDest, nLineSize);
-}
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetBGRAData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	pBitmapData->SetBGRA(pDataSrc, nLineSize);
-}
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapSetARGBData(wxGraphicsBitmap& bmp, const unsigned char* pDataSrc, int nLineSize)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	pBitmapData->SetARGB(pDataSrc, nLineSize);
-}
-
-void WXDLLIMPEXP_CORE wxGraphicsBitmapChangeData(wxGraphicsBitmap& bmp, void(*fptr)(void* rowData, int w, void* optionData), void* optionData)
-{
-	wxGraphicsBitmapData* pBitmapData = static_cast<wxGraphicsBitmapData*>(bmp.GetRefData());
-	pBitmapData->ChangeData(fptr, optionData);
-}
-#endif
 
 //-----------------------------------------------------------------------------
 // wxGraphicsContext Convenience Methods
@@ -1011,6 +964,11 @@ wxGraphicsPen wxGraphicsContext::DoCreatePen(const wxGraphicsPenInfo& info) cons
 wxGraphicsBrush wxGraphicsContext::CreateBrush(const wxBrush& brush ) const
 {
     return GetRenderer()->CreateBrush(brush);
+}
+
+wxGraphicsBrush wxGraphicsContext::CreateBrush(const wxGraphicsBitmap& bitmap) const
+{
+    return GetRenderer()->CreateBrush(bitmap);
 }
 
 wxGraphicsBrush

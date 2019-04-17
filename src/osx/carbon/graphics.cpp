@@ -525,7 +525,6 @@ class wxMacCoreGraphicsColour
 public:
 	wxMacCoreGraphicsColour();
 	wxMacCoreGraphicsColour(const wxBrush &brush);
-	wxMacCoreGraphicsColour(wxUint32 nARGB);
 	~wxMacCoreGraphicsColour();
 
 	void SetGraphicsColourMac(CGImageRef image);
@@ -606,28 +605,6 @@ wxMacCoreGraphicsColour::wxMacCoreGraphicsColour( const wxBrush &brush )
     }
 }
 
-wxMacCoreGraphicsColour::wxMacCoreGraphicsColour(wxUint32 nARGB)
-{ 
-	Init();
-	unsigned char blue  = (unsigned char)(0xFF & nARGB);
-	unsigned char green = (unsigned char)(0xFF & (nARGB >> 8));
-	unsigned char red   = (unsigned char)(0xFF & (nARGB >> 16));
-	unsigned char alpha = (unsigned char)(0xFF & (nARGB >> 24));
-	
-	CGColorRef col = 0 ;
-#if wxOSX_USE_COCOA_OR_CARBON
-	if ( CGColorCreateGenericRGB != NULL )
-		col = CGColorCreateGenericRGB( (CGFloat)(red / 255.0), (CGFloat) (green / 255.0), (CGFloat) (blue / 255.0), (CGFloat) (alpha / 255.0) );
-	else
-#endif
-	{
-		CGFloat components[4] = { (CGFloat)(red / 255.0), (CGFloat) (green / 255.0), (CGFloat) (blue / 255.0), (CGFloat) (alpha / 255.0) } ;
-		col = CGColorCreate( wxMacGetGenericRGBColorSpace() , components ) ;
-	}
-	wxASSERT_MSG(col != NULL, "Invalid CoreGraphics Color");
-	m_color.reset( col );
-}
-
 void wxMacCoreGraphicsColour::SetGraphicsColourMac(CGImageRef image)
 { 
 	m_isPattern = true;
@@ -653,16 +630,12 @@ void wxMacCoreGraphicsColour::Transform(CGImageRef image, CGAffineTransform &mat
 
 
 
-
 class wxMacCoreGraphicsBrushData : public wxGraphicsBrushData
 {
 public:
     wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer );
     wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, const wxBrush &brush );
-	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, wxUint32 nARGB);
 	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, const wxGraphicsBitmap& bitmap);
-	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, int nb_stops, const double* positions, const wxUint32* nARGB, wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2);
-	wxMacCoreGraphicsBrushData( wxGraphicsRenderer* renderer, int nb_stops, const double* positions, const wxUint32* nARGB, wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius);
     ~wxMacCoreGraphicsBrushData ();
 
     virtual void Apply( wxGraphicsContext* context );
@@ -879,12 +852,6 @@ wxMacCoreGraphicsBrushData::CreateGradientFunction(const wxGraphicsGradientStops
                             &callbacks);
 }
 
-wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, wxUint32 nARGB)
-: wxGraphicsBrushData( renderer ), m_cgColor(nARGB)
-{ 
-	Init();
-}
-
 wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, const wxGraphicsBitmap& bitmap) : wxGraphicsBrushData( renderer )
 { 
 	Init();
@@ -892,80 +859,6 @@ wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *rende
 	m_cgColor.SetGraphicsColourMac(m_cgImage);
 }
 
-wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, int nb_stops, const double *positions, const wxUint32 *nARGB, wxDouble x1, wxDouble y1, wxDouble x2, wxDouble y2)
-: wxGraphicsBrushData( renderer )
-{ 
-	Init();
-	
-	unsigned char blue      = (unsigned char)(0xFF &  nARGB[0]);
-	unsigned char green     = (unsigned char)(0xFF & (nARGB[0] >> 8));
-	unsigned char red       = (unsigned char)(0xFF & (nARGB[0] >> 16));
-	unsigned char alpha     = (unsigned char)(0xFF & (nARGB[0] >> 24));
-	
-	wxColour c_Begin(red, green, blue, alpha);
-	
-	blue      = (unsigned char)(0xFF &  nARGB[nb_stops-1]);
-	green     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 8));
-	red       = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 16));
-	alpha     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 24));
-	
-	wxColour c_End(red, green, blue, alpha);
-	
-	
-	wxGraphicsGradientStops m_Stop(c_Begin, c_End);
-	
-	for (int i = 0; i < nb_stops; ++i)
-	{
-		blue      = (unsigned char)(0xFF &  nARGB[i]);
-		green     = (unsigned char)(0xFF & (nARGB[i] >> 8));
-		red       = (unsigned char)(0xFF & (nARGB[i] >> 16));
-		alpha     = (unsigned char)(0xFF & (nARGB[i] >> 24));
-		wxColour m_Color(red, green, blue, alpha);
-		m_Stop.Add(m_Color, (float)positions[i]);
-	}
-	
-	m_gradientFunction = CreateGradientFunction(m_Stop);
-	m_shading = CGShadingCreateAxial( wxMacGetGenericRGBColorSpace(), CGPointMake((CGFloat) x1, (CGFloat) y1),
-									 CGPointMake((CGFloat) x2,(CGFloat) y2), m_gradientFunction, true, true ) ;
-	
-	m_isShading = true ;
-}
-
-wxMacCoreGraphicsBrushData::wxMacCoreGraphicsBrushData(wxGraphicsRenderer *renderer, int nb_stops, const double *positions, const wxUint32 *nARGB, wxDouble xo, wxDouble yo, wxDouble xc, wxDouble yc, wxDouble radius)
-: wxGraphicsBrushData( renderer )
-{ 
-	Init();
-	
-	unsigned char blue      = (unsigned char)(0xFF & nARGB[0]);
-	unsigned char green     = (unsigned char)(0xFF & (nARGB[0] >> 8));
-	unsigned char red       = (unsigned char)(0xFF & (nARGB[0] >> 16));
-	unsigned char alpha     = (unsigned char)(0xFF & (nARGB[0] >> 24));
-	
-	wxColour c_Begin(red, green, blue, alpha);
-	
-	blue      = (unsigned char)(0xFF & nARGB[nb_stops-1]);
-	green     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 8));
-	red       = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 16));
-	alpha     = (unsigned char)(0xFF & (nARGB[nb_stops-1] >> 24));
-	
-	wxColour c_End(red, green, blue, alpha);
-	
-	wxGraphicsGradientStops m_Stop(c_Begin, c_End);
-	
-	for (int i = 0; i < nb_stops; ++i)
-	{
-		unsigned char blue      = (unsigned char)(0xFF &  nARGB[i]);
-		unsigned char green     = (unsigned char)(0xFF & (nARGB[i] >> 8));
-		unsigned char red       = (unsigned char)(0xFF & (nARGB[i] >> 16));
-		unsigned char alpha     = (unsigned char)(0xFF & (nARGB[i] >> 24));
-		wxColour m_Color(red, green, blue, alpha);
-		m_Stop.Add(m_Color, (float)positions[i]);
-	}
-	
-	m_gradientFunction = CreateGradientFunction(m_Stop);
-	m_shading = CGShadingCreateRadial( wxMacGetGenericRGBColorSpace(), CGPointMake((CGFloat) xo, (CGFloat) yo), (CGFloat) 0, CGPointMake((CGFloat) xc,(CGFloat) yc), (CGFloat) radius, m_gradientFunction, true, true ) ;
-	m_isShading = true ;
-}
 
 void wxMacCoreGraphicsBrushData::Transform(const wxGraphicsMatrixData* matrix)
 { 
@@ -1012,13 +905,7 @@ void *wxMacCoreGraphicsBrushData::GetNativeBrush() const
 { 
 	return nullptr;
 }
-
-
-
-
-
-
-
+`
 
 //
 // Font
@@ -1196,16 +1083,6 @@ wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* ren
 		Create(bitmap, bmp.GetScaleFactor());
 		CGImageRelease(bitmap);
 	}
-	Init();
-	Create(bmp.GetWidth(), bmp.GetHeight(), bmp.GetDepth(), bmp.GetScaleFactor());
-	
-	if (bmp.HasAlpha())
-		UseAlpha(true);
-	
-	unsigned char* dest = (unsigned char*)GetRawAccess();
-	unsigned char* source = (unsigned char*)bmp.GetRefData();
-	size_t numbytes = GetBytesPerRow() * GetHeight();
-	memcpy( dest, source, numbytes );
 }
 
 wxMacCoreGraphicsBitmapData::wxMacCoreGraphicsBitmapData(wxGraphicsRenderer* renderer, int w, int h, double dScaleFactor) : wxGraphicsBitmapData(renderer)
@@ -4354,13 +4231,6 @@ wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush(const wxBrush& brush )
         p.SetRefData(new wxMacCoreGraphicsBrushData( this, brush ));
         return p;
     }
-}
-
-wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush( wxUint32 nARGB )
-{
-	wxGraphicsBrush p;
-	p.SetRefData(new wxMacCoreGraphicsBrushData( this, nARGB ));
-	return p;
 }
 
 wxGraphicsBrush wxMacCoreGraphicsRenderer::CreateBrush(const wxGraphicsBitmap& bmp)
