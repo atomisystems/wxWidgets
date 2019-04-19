@@ -5016,8 +5016,28 @@ bool wxRichTextParagraph::Draw(wxDC& dc, wxRichTextDrawingContext& context, cons
                                 int descent = 0;
                                 wxPoint wordPosition = objectPosition + wxPoint(nWordSumWidth + nLineSpaceBefore * nLineRemainSpace / nLineSpaceCount, 0);
                                 child->GetRangeSize(wordRange, wordSize, descent, dc, context, wxRICHTEXT_UNFORMATTED, wordPosition);
-                                wxRect wordRect(wordPosition, wxSize(wordSize.x, line->GetSize().y));
-                                child->Draw(dc, context, wordRange, selection, wordRect, maxDescent, style);
+
+                                if (wordRange.IsWithin(range))
+                                {
+                                    wxRect wordRect(wordPosition, wxSize(wordSize.x, line->GetSize().y));
+                                    child->Draw(dc, context, wordRange, selection, wordRect, maxDescent, style);
+                                }
+                                else if (wordRange.IsOutside(range))
+                                {
+                                    //Do nothing
+                                }
+                                else
+                                {
+                                    wxSize rangeSize;
+                                    wxArrayInt charWidths;
+                                    child->GetRangeSize(wordRange, rangeSize, descent, dc, context, wxRICHTEXT_UNFORMATTED, wordPosition, wordSize, &charWidths);
+                                    int charIndex = wxMax(wordRange.GetStart(), range.GetStart()) - wordRange.GetStart();
+                                    int offsetPos = (charIndex > 0 && charIndex < charWidths.size()) ? charWidths[charIndex - 1] : 0;
+                                    wxRect drawRect(wordPosition + wxPoint(offsetPos, 0), wxSize(wordSize.x - offsetPos, line->GetSize().y));
+                                    wordRange.LimitTo(range);
+                                    child->Draw(dc, context, wordRange, selection, drawRect, maxDescent, style);
+                                }
+
                                 nWordSumWidth += wordSize.x;
                             }
                             if (bSpaceChar)
@@ -5029,9 +5049,28 @@ bool wxRichTextParagraph::Draw(wxDC& dc, wxRichTextDrawingContext& context, cons
                     }
                     else
                     {
-                        // Use the child object's width, but the whole line's height
-                        wxRect childRect(objectPosition, wxSize(objectSize.x, line->GetSize().y));
-                        child->Draw(dc, context, objectRange, selection, childRect, maxDescent, style);
+                        if (objectRange.IsWithin(range))
+                        {
+                            // Use the child object's width, but the whole line's height
+                            wxRect childRect(objectPosition, wxSize(objectSize.x, line->GetSize().y));
+                            child->Draw(dc, context, objectRange, selection, childRect, maxDescent, style);
+                        }
+                        else if (objectRange.IsOutside(range))
+                        {
+                            //Do nothing
+                        }
+                        else
+                        {
+                            int descent = 0;
+                            wxSize rangeSize;
+                            wxArrayInt charWidths;
+                            child->GetRangeSize(objectRange, rangeSize, descent, dc, context, wxRICHTEXT_UNFORMATTED, objectPosition, objectSize, &charWidths);
+                            int charIndex = wxMax(objectRange.GetStart(), range.GetStart()) - objectRange.GetStart();
+                            int offsetPos = (charIndex > 0 && charIndex < charWidths.size()) ? charWidths[charIndex - 1] : 0;
+                            wxRect drawRect(objectPosition + wxPoint(offsetPos, 0), wxSize(objectSize.x - offsetPos, line->GetSize().y));
+                            objectRange.LimitTo(range);
+                            child->Draw(dc, context, objectRange, selection, drawRect, maxDescent, style);
+                        }
                     }
 
                     objectPosition.x += objectSize.x;
@@ -6021,6 +6060,7 @@ bool wxRichTextParagraph::GetRangeSize(const wxRichTextRange& range, wxSize& siz
                     {
                         wxRichTextRange rangeToUse = lineRange;
                         rangeToUse.LimitTo(child->GetRange());
+                        rangeToUse.LimitTo(range);
                         if (child->IsTopLevel())
                             rangeToUse = child->GetOwnRange();
 
@@ -6280,7 +6320,7 @@ int wxRichTextParagraph::HitTest(wxDC& dc, wxRichTextDrawingContext& context, co
                             nLineSpaceCount++;
                     }
                 }
-                
+
                 int lastX = linePos.x;
                 size_t i;
                 for (i = 0; i < partialExtents.GetCount(); i++)
